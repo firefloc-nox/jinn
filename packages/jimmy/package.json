@@ -1,0 +1,41 @@
+{
+  "name": "@jimmy-ai/cli",
+  "version": "0.1.0",
+  "description": "Lightweight AI gateway daemon orchestrating Claude Code and Codex",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "jimmy": "./dist/bin/jimmy.js"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/",
+    "template/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.3.0",
+    "better-sqlite3": "^11.8.0",
+    "chokidar": "^4.0.0",
+    "commander": "^13.1.0",
+    "js-yaml": "^4.1.0",
+    "node-cron": "^3.0.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/js-yaml": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.8.0"
+  }
+}
