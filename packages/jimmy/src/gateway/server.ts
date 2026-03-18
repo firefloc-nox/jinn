@@ -146,7 +146,7 @@ export async function startGateway(
   if (config.connectors?.whatsapp) {
     connectorNames.push("whatsapp");
   }
-  if (config.connectors?.telegram?.botToken) {
+  if (config.connectors?.telegram?.botToken || config.connectors?.telegram?.bots?.length) {
     connectorNames.push("telegram");
   }
 
@@ -251,11 +251,16 @@ export async function startGateway(
     }
   }
 
-  if (config.connectors?.telegram?.botToken) {
+  if (config.connectors?.telegram?.botToken || config.connectors?.telegram?.bots?.length) {
     try {
-      const telegram = new TelegramConnector(config.connectors.telegram);
+      const telegram = new TelegramConnector(config.connectors.telegram!);
       telegram.onMessage((msg) => {
-        sessionManager.route(msg, telegram).catch((err) => {
+        // If the bot is bound to an employee, resolve and pass as route option
+        const boundName = (msg.transportMeta as Record<string, unknown> | undefined)?.boundEmployee;
+        const routeOpts = typeof boundName === "string"
+          ? { employee: employeeRegistry.get(boundName) }
+          : {};
+        sessionManager.route(msg, telegram, routeOpts).catch((err) => {
           logger.error(`Telegram route error: ${err instanceof Error ? err.message : err}`);
         });
       });

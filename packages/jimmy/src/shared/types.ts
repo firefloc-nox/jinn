@@ -277,8 +277,17 @@ export interface WhatsAppConnectorConfig {
   ignoreOldMessagesOnBoot?: boolean;
 }
 
-export interface TelegramConnectorConfig {
+export interface TelegramBotConfig {
   botToken: string;
+  /** Employee name this bot is bound to — messages route directly to this agent */
+  employee?: string;
+}
+
+export interface TelegramConnectorConfig {
+  /** Single bot token (simple mode) */
+  botToken?: string;
+  /** Multiple bots, each optionally bound to an employee (team mode) */
+  bots?: TelegramBotConfig[];
   /** Allowed Telegram user IDs — empty or omitted = allow all */
   allowFrom?: string | string[];
   ignoreOldMessagesOnBoot?: boolean;

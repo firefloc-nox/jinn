@@ -109,6 +109,8 @@ Uses `node-telegram-bot-api` with long polling (no webhook URL required).
 
 ### Configuration
 
+**Single bot mode:**
+
 ```yaml
 connectors:
   telegram:
@@ -116,6 +118,23 @@ connectors:
     allowFrom: []                  # Optional: restrict to specific Telegram user IDs
     ignoreOldMessagesOnBoot: true
 ```
+
+**Team mode (multiple bots, each bound to an agent):**
+
+```yaml
+connectors:
+  telegram:
+    bots:
+      - botToken: "123456:ABC-..."
+        employee: gentech          # All messages to this bot route to gentech
+      - botToken: "654321:DEF-..."
+        employee: yoyo
+      - botToken: "789012:GHI-..."
+        employee: dmob
+    ignoreOldMessagesOnBoot: true
+```
+
+In team mode, each bot runs its own polling loop. Messages sent to a bot are automatically routed to the bound employee — no `@mention` needed. Each bot gets its own session per chat.
 
 ### Required Setup
 
