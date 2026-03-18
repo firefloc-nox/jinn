@@ -18,6 +18,9 @@ engines:
 
 connectors:
   slack:
+    # appToken: xapp-...          # Socket Mode token (from Slack App → Basic Information → App-Level Tokens)
+    # botToken: xoxb-...          # Bot token (from Slack App → OAuth & Permissions)
+    # allowFrom: []               # Optional: restrict to specific Slack user IDs
     shareSessionInChannel: false
     ignoreOldMessagesOnBoot: true
 

@@ -36,7 +36,20 @@ connectors:
   slack:
     appToken: xapp-...    # Socket Mode app token
     botToken: xoxb-...    # Bot user OAuth token
+    allowFrom: []          # Optional: restrict to specific Slack user IDs
+    shareSessionInChannel: false
+    ignoreOldMessagesOnBoot: true
 ```
+
+### Required Slack App Setup
+
+1. Create a Slack app at https://api.slack.com/apps
+2. Enable **Socket Mode** and generate an app-level token (`xapp-...`) with `connections:write` scope
+3. Add **Bot Token Scopes**: `chat:write`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `reactions:read`, `reactions:write`, `files:read`, `users:read`, `assistant:write`
+4. Subscribe to **Bot Events**: `message.channels`, `message.groups`, `message.im`, `reaction_added`
+5. Install the app to your workspace and copy the Bot User OAuth Token (`xoxb-...`)
+
+For a full walkthrough, use the `slack-setup` skill.
 
 ### Thread Mapping
 
@@ -63,10 +76,37 @@ Reactions provide visual feedback during processing:
 - `@mention`: messages mentioning a specific employee name route to that employee
 - Thread continuity: replies in a thread continue with the same employee
 
+## Discord Connector
+
+Uses `discord.js` with a bot token. Supports both direct integration and remote proxy mode.
+
+### Configuration
+
+```yaml
+connectors:
+  discord:
+    botToken: ...           # Discord bot token
+    guildId: ...            # Optional: restrict to a specific server
+    allowFrom: []           # Optional: restrict to specific Discord user IDs
+    ignoreOldMessagesOnBoot: true
+```
+
+## WhatsApp Connector
+
+Uses `@whiskeysockets/baileys` for unofficial WhatsApp Web integration via QR code authentication.
+
+### Configuration
+
+```yaml
+connectors:
+  whatsapp:
+    allowFrom: []           # Optional: restrict to specific phone numbers
+```
+
 ## Future Connectors
 
 The connector interface is designed for additional platforms:
-- **Discord**: Bot integration via discord.js
+- **Telegram**: Bot API integration
 - **iMessage**: macOS-only via AppleScript bridge
-- **Web UI**: Built-in, served by the HTTP server
-- **CLI**: Direct terminal input/output
+- **Email**: IMAP/SMTP integration
+- **Webhooks**: Generic HTTP webhook receiver
