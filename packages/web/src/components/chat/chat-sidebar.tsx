@@ -1,12 +1,10 @@
 "use client"
 
 import { useEffect, useState, useRef, useCallback, useMemo, startTransition } from "react"
-import { ChevronDown, Clock3, EllipsisVertical, Pencil, Pin, Plus, Search, Trash2, X } from "lucide-react"
+import { ChevronDown, Clock3, EllipsisVertical, Pin, Plus, Search, Trash2, X } from "lucide-react"
 import { api, type Employee } from "@/lib/api"
-import { EmployeeAvatar } from "@/components/ui/employee-avatar"
 import { useSettings } from "@/app/settings-provider"
-import { cleanPreview } from "@/lib/clean-preview"
-import { useSessions, useUpdateSession, useDeleteSession, useBulkDeleteSessions } from "@/hooks/use-sessions"
+import { useSessions, useDeleteSession, useBulkDeleteSessions } from "@/hooks/use-sessions"
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -33,12 +31,6 @@ interface Session {
   [key: string]: unknown
 }
 
-export interface SidebarOrder {
-  sessionIds: string[]
-  employeeNames: string[]
-  employeeSessionMap: Record<string, string[]>
-}
-
 interface ChatSidebarProps {
   selectedId: string | null
   onSelect: (id: string) => void
@@ -46,7 +38,6 @@ interface ChatSidebarProps {
   onDelete?: (id: string) => void
   onSessionsLoaded?: (sessions: Session[]) => void
   onEmployeeSessionsAvailable?: (sessions: Session[]) => void
-  onOrderComputed?: (order: SidebarOrder) => void
 }
 
 interface FlatItem {
@@ -147,10 +138,6 @@ function saveExpandedState(expanded: Record<string, boolean>) {
   } catch {}
 }
 
-function titleCase(slug: string): string {
-  return slug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
-}
-
 function isCronSession(session: Session): boolean {
   return session.source === "cron" || (session.sourceRef || "").startsWith("cron:")
 }
@@ -226,7 +213,6 @@ export function ChatSidebar({
   onDelete,
   onSessionsLoaded,
   onEmployeeSessionsAvailable,
-  onOrderComputed,
 }: ChatSidebarProps) {
   const { settings } = useSettings()
   const portalName = settings.portalName ?? "Jinn"
@@ -241,7 +227,6 @@ export function ChatSidebar({
   }
 
   const { data: rawSessions, isLoading: loading } = useSessions()
-  const updateSessionMutation = useUpdateSession()
   const deleteSessionMutation = useDeleteSession()
   const bulkDeleteMutation = useBulkDeleteSessions()
 
@@ -260,8 +245,6 @@ export function ChatSidebar({
 
   const [search, setSearch] = useState("")
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
-  const renameCancelledRef = useRef(false)
   const [readSessions, setReadSessions] = useState<Set<string>>(new Set())
   const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -300,21 +283,7 @@ export function ChatSidebar({
     }
   }, [selectedId])
 
-  // Fetch employee display names from org API
-  useEffect(() => {
-    api.getOrg().then(async (org) => {
-      const map = new Map<string, Employee>()
-      await Promise.all(
-        org.employees.map(async (name: string) => {
-          try {
-            const emp = await api.getEmployee(name)
-            map.set(name, emp)
-          } catch { /* skip */ }
-        }),
-      )
-      setEmployeeData(map)
-    }).catch(() => { /* best-effort */ })
-  }, [])
+  // Employee detail endpoint doesn't exist on current gateway — skip fetching
 
   const toggleCronCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -378,39 +347,6 @@ export function ChatSidebar({
   }
 
   async function handleDelete(sessionId: string) {
-    // Compute next session to select before removing
-    let nextSelectId: string | null = null
-    if (selectedId === sessionId) {
-      // Build a flat ordered list of all visible session IDs
-      const allVisible: string[] = []
-      const addGroup = (items: FlatItem[]) => {
-        for (const item of items) {
-          const empName = item.employeeName!
-          const empSessions = item.sessions || []
-          // Always add the latest session (employee row click selects it)
-          if (empSessions.length === 1) {
-            allVisible.push(empSessions[0].id)
-          } else if (expanded[empName]) {
-            const visible = fullyExpanded[empName] ? empSessions : empSessions.slice(0, 5)
-            for (const s of visible) allVisible.push(s.id)
-          } else {
-            // Collapsed — only the latest session is reachable
-            if (empSessions.length > 0) allVisible.push(empSessions[0].id)
-          }
-        }
-      }
-      addGroup(pinnedFlat)
-      addGroup(unpinnedFlat)
-      for (const s of sortedCron) allVisible.push(s.id)
-
-      const idx = allVisible.indexOf(sessionId)
-      if (idx !== -1) {
-        // Prefer next item, then previous
-        if (idx + 1 < allVisible.length) nextSelectId = allVisible[idx + 1]
-        else if (idx - 1 >= 0) nextSelectId = allVisible[idx - 1]
-      }
-    }
-
     try {
       await deleteSessionMutation.mutateAsync(sessionId)
       setPinnedSessions((prev) => {
@@ -421,13 +357,8 @@ export function ChatSidebar({
         return next
       })
       startTransition(() => {
-        if (nextSelectId) {
-          onSelect(nextSelectId)
-        } else if (onDelete) {
-          onDelete(sessionId)
-        } else if (selectedId === sessionId) {
-          onNewChat()
-        }
+        if (onDelete) onDelete(sessionId)
+        else if (selectedId === sessionId) onNewChat()
       })
     } catch {}
   }
@@ -505,31 +436,6 @@ export function ChatSidebar({
   const cronCollapsed = collapsed.has("cron")
   const sortedCron = sortSessionsByActivity(cronSessions)
 
-  // Emit flat session order for keyboard navigation (J/K/E shortcuts)
-  const orderRef = useRef<string>('')
-  const allFlatIds = useMemo(() => {
-    const ids: string[] = []
-    const empNames: string[] = []
-    const empMap: Record<string, string[]> = {}
-    for (const item of [...pinnedFlat, ...unpinnedFlat]) {
-      const name = item.employeeName!
-      empNames.push(name)
-      const sessionIds = item.sessions!.map(s => s.id)
-      empMap[name] = sessionIds
-      ids.push(...sessionIds)
-    }
-    for (const s of sortedCron) ids.push(s.id)
-    return { sessionIds: ids, employeeNames: empNames, employeeSessionMap: empMap }
-  }, [pinnedFlat, unpinnedFlat, sortedCron])
-
-  useEffect(() => {
-    const key = allFlatIds.sessionIds.join(',')
-    if (key !== orderRef.current) {
-      orderRef.current = key
-      onOrderComputed?.(allFlatIds)
-    }
-  }, [allFlatIds, onOrderComputed])
-
   function isEmployeeActive(empSessions: Session[]): boolean {
     return empSessions.some((s) => s.id === selectedId)
   }
@@ -556,27 +462,24 @@ export function ChatSidebar({
     const sessionDotColor = getStatusDotColor(session, readSessions)
     const sessionIsRunning = session.status === "running"
     const sessionTitle = fixTitle(session.title, session.employee)
-    const displayTitle = cleanPreview(sessionTitle) || sessionTitle
     const sessionTime = formatTime(getSessionActivity(session))
     const isPinned = pinnedSessions.has(session.id)
     const isHovered = hoveredKey === session.id
-    const isRenaming = renamingSessionId === session.id
-    const RowTag = isRenaming ? "div" : "button"
 
     return (
       <ContextMenu key={session.id}>
         <ContextMenuTrigger asChild>
-          <RowTag
-            {...(!isRenaming && { onClick: () => {
+          <button
+            onClick={() => {
               onSelect(session.id)
               onEmployeeSessionsAvailable?.(parentSessions ?? [session])
-            }})}
+            }}
             onMouseEnter={() => setHoveredKey(session.id)}
             onMouseLeave={() => { if (hoveredKey !== `menu:${session.id}`) setHoveredKey(null) }}
             className={cn(
               "group relative flex w-full items-center gap-2.5 border-l-2 px-4 py-2 text-left transition-colors",
               parentSessions
-                ? "pl-11"
+                ? "pl-[67px]"
                 : "pl-6",
               sessionIsActive
                 ? "border-l-[var(--accent)] bg-[var(--fill-secondary)]"
@@ -584,47 +487,14 @@ export function ChatSidebar({
             )}
           >
             <StatusDot color={sessionDotColor} pulse={sessionIsRunning} className="size-1.5" />
-            {isRenaming ? (
-              <input
-                autoFocus
-                maxLength={200}
-                defaultValue={displayTitle}
-                className={cn(
-                  "min-w-0 flex-1 truncate border-none bg-transparent text-xs outline-none ring-1 ring-[var(--accent)] rounded px-0.5",
-                  sessionIsActive ? "font-semibold text-foreground" : "text-[var(--text-secondary)]"
-                )}
-                onFocus={(e) => e.target.select()}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.currentTarget.blur()
-                  } else if (e.key === "Escape") {
-                    renameCancelledRef.current = true
-                    setRenamingSessionId(null)
-                  }
-                }}
-                onBlur={(e) => {
-                  if (renameCancelledRef.current) {
-                    renameCancelledRef.current = false
-                    return
-                  }
-                  const val = e.target.value.trim()
-                  if (val && val !== displayTitle) {
-                    updateSessionMutation.mutate({ id: session.id, data: { title: val } })
-                  }
-                  setRenamingSessionId(null)
-                }}
-              />
-            ) : (
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate text-xs",
-                  sessionIsActive ? "font-semibold text-foreground" : "text-[var(--text-secondary)]"
-                )}
-              >
-                {cleanPreview(sessionTitle) || "Untitled"}
-              </span>
-            )}
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-xs",
+                sessionIsActive ? "font-semibold text-foreground" : "text-[var(--text-secondary)]"
+              )}
+            >
+              {sessionTitle || "Untitled"}
+            </span>
             {isPinned ? (
               <Pin className={cn("size-3 shrink-0 text-[var(--accent)]", isHovered && "hidden lg:hidden")} />
             ) : null}
@@ -648,12 +518,6 @@ export function ChatSidebar({
                 onMouseLeave={() => setHoveredKey(null)}
               >
                 <button
-                  onClick={(e) => { e.stopPropagation(); setHoveredKey(null); renameCancelledRef.current = false; setRenamingSessionId(session.id) }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-accent"
-                >
-                  <Pencil className="size-3" /> Rename
-                </button>
-                <button
                   onClick={(e) => { e.stopPropagation(); togglePin(session.id); setHoveredKey(null) }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-accent"
                 >
@@ -668,19 +532,15 @@ export function ChatSidebar({
                 </button>
               </div>
             ) : null}
-          </RowTag>
+          </button>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => { renameCancelledRef.current = false; setRenamingSessionId(session.id) }}>
-            Rename
-          </ContextMenuItem>
           <ContextMenuItem onClick={() => togglePin(session.id)}>
             {isPinned ? "Unpin" : "Pin"}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onClick={() => { if (window.confirm('Delete this session?')) handleDelete(session.id) }}>
-            <span className="flex-1">Delete session</span>
-            <kbd className="ml-auto pl-3 font-mono text-[10px] text-[var(--text-quaternary)]">⌫</kbd>
+            Delete session
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
@@ -692,7 +552,8 @@ export function ChatSidebar({
     const empSessions = item.sessions!
     const latestSession = empSessions[0]
     const empInfo = item.employeeData
-    const displayName = empInfo?.displayName || titleCase(empName)
+    const displayName = empInfo?.displayName || empName
+    const emoji = empInfo?.emoji || "\u{1F916}"
     const department = empInfo?.department || ""
     const timeLabel = formatTime(getSessionActivity(latestSession))
     const dotColor = getStatusDotColor(latestSession, readSessions)
@@ -721,12 +582,12 @@ export function ChatSidebar({
                   : "border-l-transparent hover:bg-accent"
               )}
             >
-              <div className="relative flex size-9 shrink-0 items-center justify-center">
-                <EmployeeAvatar name={empName} size={36} />
+              <div className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--fill-secondary)] text-lg">
+                {emoji}
                 <StatusDot
                   color={dotColor}
                   pulse={pulse}
-                  className="absolute -bottom-0.5 -right-0 size-2.5 border-2 border-[var(--sidebar-bg)]"
+                  className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-[var(--sidebar-bg)]"
                 />
               </div>
 
@@ -818,7 +679,7 @@ export function ChatSidebar({
         {isExpanded && sessionCount > 5 && !fullyExpanded[empName] ? (
           <button
             onClick={() => setFullyExpanded((prev) => ({ ...prev, [empName]: true }))}
-            className="w-full cursor-pointer px-4 pb-2 pl-11 text-left text-[10px] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
+            className="w-full cursor-pointer px-4 pb-2 pl-[67px] text-left text-[10px] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
           >
             +{sessionCount - 5} more
           </button>
@@ -827,30 +688,29 @@ export function ChatSidebar({
     )
   }
 
+  const hasPinnedItems = pinnedFlat.length > 0
+
   return (
     <div className="flex h-full flex-col border-r border-border bg-[var(--sidebar-bg)]">
-      <div className="shrink-0 border-b border-border bg-[var(--material-thick)] px-4 pb-3 pt-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
+      <div className="shrink-0 border-b border-border bg-[var(--material-thick)] px-4 pb-3 pt-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">Chats</h2>
-            <p className="text-xs text-muted-foreground">All conversations</p>
+            <p className="text-xs text-muted-foreground">Sessions, employees, and cron runs</p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Button size="sm" className="gap-1.5" onClick={onNewChat} title="New chat (N)">
-              <Plus className="size-3.5" />
-              New
-            </Button>
-          </div>
+          <Button size="sm" className="gap-1.5" onClick={onNewChat}>
+            <Plus className="size-3.5" />
+            New
+          </Button>
         </div>
 
         <div className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--fill-tertiary)] px-3 py-2">
           <Search className="size-3.5 shrink-0 text-[var(--text-tertiary)]" />
           <input
-            id="chat-search"
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
+            placeholder="Search chats..."
             aria-label="Search chats"
             className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-[var(--text-tertiary)]"
           />
@@ -866,7 +726,7 @@ export function ChatSidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto py-1">
         {loading ? (
           <div className="px-4 py-8 text-center text-xs text-[var(--text-quaternary)]">
             Loading sessions...
@@ -877,7 +737,14 @@ export function ChatSidebar({
           </div>
         ) : (
           <>
-            {pinnedFlat.map((item) => renderEmployeeItem(item))}
+            {hasPinnedItems ? (
+              <>
+                <SectionLabel icon={"\u{1F4CC}"} label="Pinned" />
+                {pinnedFlat.map((item) => renderEmployeeItem(item))}
+                {unpinnedFlat.length > 0 ? <div className="mx-4 my-2 border-t border-border" /> : null}
+              </>
+            ) : null}
+
             {unpinnedFlat.map((item) => renderEmployeeItem(item))}
 
             {cronSessions.length > 0 ? (
