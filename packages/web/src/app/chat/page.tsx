@@ -1,24 +1,29 @@
 "use client"
-import React, { useState, useCallback, useEffect, useRef, useMemo, Suspense } from 'react'
+import React, { useState, useCallback, useEffect, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import { useGateway } from '@/hooks/use-gateway'
 import { PageLayout } from '@/components/page-layout'
-import { ChatSidebar, type SidebarOrder } from '@/components/chat/chat-sidebar'
+import { ChatSidebar } from '@/components/chat/chat-sidebar'
 import { ChatTabBar } from '@/components/chat/chat-tabs'
 import { ChatPane } from '@/components/chat/chat-pane'
-import { ShortcutOverlay } from '@/components/chat/shortcut-overlay'
 import { useChatTabs } from '@/hooks/use-chat-tabs'
-import { useKeyboardShortcuts, type ShortcutDef } from '@/hooks/use-keyboard-shortcuts'
 import { useDeleteSession } from '@/hooks/use-sessions'
 import { clearIntermediateMessages } from '@/lib/conversations'
 import { useSettings } from '@/app/settings-provider'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Check, EllipsisVertical, Trash2, Activity } from 'lucide-react'
-import { useSessionActivity } from '@/hooks/use-session-activity'
-import { SessionActivityPanel } from '@/components/activity/session-activity-panel'
+import { ChevronLeft, Check, EllipsisVertical, Trash2 } from 'lucide-react'
 
 function getOnboardingPrompt(portalName: string, userMessage: string) {
   return `This is your first time being activated. The user just set up ${portalName} and opened the web dashboard for the first time.
@@ -86,35 +91,14 @@ function ChatPage() {
   const [employeeSessions, setEmployeeSessions] = useState<Array<{ id: string; title?: string; lastActivity?: string; createdAt?: string }>>([])
   // When true, user explicitly started a new chat — don't auto-select first session
   const newChatIntentRef = useRef(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('jinn-chat-sidebar-collapsed') === 'true'
-    }
-    return false
-  })
-  const toggleSidebar = useCallback(() => {
-    // Mobile: toggle mobileView between sidebar and chat
-    const isMobile = window.innerWidth < 1024
-    if (isMobile) {
-      setMobileView((prev) => (prev === 'sidebar' ? 'chat' : 'sidebar'))
-    } else {
-      setSidebarCollapsed((prev) => {
-        const next = !prev
-        localStorage.setItem('jinn-chat-sidebar-collapsed', String(next))
-        return next
-      })
-    }
-  }, [])
   const [viewMode, setViewMode] = useState<'chat' | 'cli'>('chat')
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
-  const [focusTrigger, setFocusTrigger] = useState(0)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const sessionPickerRef = useRef<HTMLDivElement>(null)
-  const [activityOpen, setActivityOpen] = useState(false)
-  const { events, connected, connectionSeq, skillsVersion, subscribe } = useGateway()
-  const { events: activityEvents, sessionStatus } = useSessionActivity({ sessionId: selectedId, subscribe })
+  const { events, connectionSeq, skillsVersion, subscribe } = useGateway()
   const chatTabs = useChatTabs()
   const searchParams = useSearchParams()
   const onboardingTriggered = useRef(false)
@@ -122,9 +106,6 @@ function ChatPage() {
   const stubSessionRef = useRef(false)
   const deleteSessionMutation = useDeleteSession()
   const qc = useQueryClient()
-  const [showShortcutOverlay, setShowShortcutOverlay] = useState(false)
-  const sidebarOrderRef = useRef<SidebarOrder>({ sessionIds: [], employeeNames: [], employeeSessionMap: {} })
-  const handleOrderComputed = useCallback((order: SidebarOrder) => { sidebarOrderRef.current = order }, [])
 
 
   // Close more menu on outside click
@@ -183,14 +164,12 @@ function ChatPage() {
   }
 
   // Update tab label/status when session meta changes
-  const { updateTabStatus } = chatTabs
   useEffect(() => {
     if (!selectedId || !sessionMeta) return
-    updateTabStatus(selectedId, {
+    chatTabs.updateTabStatus(selectedId, {
       label: sessionMeta.title || sessionMeta.employee || portalName,
-      employeeName: sessionMeta.employee || undefined,
     })
-  }, [selectedId, sessionMeta, portalName, updateTabStatus])
+  }, [selectedId, sessionMeta, portalName, chatTabs])
 
   const handleEmployeeSessionsAvailable = useCallback(
     (sessions: Array<{ id: string; title?: string; lastActivity?: string; createdAt?: string }>) => {
@@ -219,7 +198,6 @@ function ChatPage() {
     setMobileView('chat')
     setEmployeeSessions([])
     chatTabs.clearActiveTab()
-    setFocusTrigger(prev => prev + 1)
   }, [chatTabs])
 
   const handleSessionsLoaded = useCallback(
@@ -231,24 +209,22 @@ function ChatPage() {
     [selectedId, handleSelect]
   )
 
-  const handleDeleteSession = useCallback(async (id: string) => {
-    try {
-      await deleteSessionMutation.mutateAsync(id)
-    } catch { /* sidebar may have already deleted it */ }
+  const handleDeleteSession = useCallback((id: string) => {
+    // Session already deleted by sidebar mutation — just clear local state
     if (selectedId === id) {
       setSelectedId(null)
       setSessionMeta(null)
     }
     clearIntermediateMessages(id)
     chatTabs.closeTab(chatTabs.tabs.findIndex(t => t.sessionId === id))
+    setConfirmDelete(false)
     setShowMoreMenu(false)
-    qc.invalidateQueries({ queryKey: queryKeys.sessions.all })
-  }, [selectedId, chatTabs, deleteSessionMutation, qc])
+  }, [selectedId, chatTabs])
 
   // ChatPane callbacks
   const handleSessionCreated = useCallback((newId: string) => {
     setSelectedId(newId)
-    chatTabs.openTab({ sessionId: newId, label: 'New Chat', status: 'running', unread: false, pinned: true })
+    chatTabs.openTab({ sessionId: newId, label: 'New Chat', status: 'running', unread: false })
     qc.invalidateQueries({ queryKey: queryKeys.sessions.all })
   }, [chatTabs, qc])
 
@@ -268,82 +244,29 @@ function ChatPage() {
     stubSessionRef.current = false
   }, [])
 
-  // Navigation helpers for keyboard shortcuts
-  const navigateSession = useCallback((direction: 1 | -1) => {
-    const { sessionIds } = sidebarOrderRef.current
-    if (sessionIds.length === 0) return
-    if (!selectedId) {
-      handleSelect(direction === 1 ? sessionIds[0] : sessionIds[sessionIds.length - 1])
-      return
+  // Tab keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.metaKey && e.key === 'w') {
+        e.preventDefault()
+        if (chatTabs.activeIndex >= 0) chatTabs.closeTab(chatTabs.activeIndex)
+      }
+      if (e.metaKey && e.shiftKey && e.key === '[') {
+        e.preventDefault()
+        chatTabs.prevTab()
+      }
+      if (e.metaKey && e.shiftKey && e.key === ']') {
+        e.preventDefault()
+        chatTabs.nextTab()
+      }
+      if (e.metaKey && e.altKey && e.key >= '1' && e.key <= '9') {
+        e.preventDefault()
+        chatTabs.switchTab(parseInt(e.key) - 1)
+      }
     }
-    const idx = sessionIds.indexOf(selectedId)
-    if (idx === -1) {
-      handleSelect(direction === 1 ? sessionIds[0] : sessionIds[sessionIds.length - 1])
-      return
-    }
-    const next = (idx + direction + sessionIds.length) % sessionIds.length
-    handleSelect(sessionIds[next])
-  }, [selectedId, handleSelect])
-
-  const cycleEmployee = useCallback(() => {
-    const { employeeNames, employeeSessionMap } = sidebarOrderRef.current
-    if (employeeNames.length === 0) return
-    const currentEmployee = sessionMeta?.employee ?? null
-    const currentIdx = currentEmployee ? employeeNames.indexOf(currentEmployee) : -1
-    const nextIdx = (currentIdx + 1) % employeeNames.length
-    const nextEmployee = employeeNames[nextIdx]
-    const firstSession = employeeSessionMap[nextEmployee]?.[0]
-    if (firstSession) handleSelect(firstSession)
-  }, [sessionMeta, handleSelect])
-
-  const copyChat = useCallback(async () => {
-    if (!selectedId) return
-    try {
-      const session = await api.getSession(selectedId) as { messages?: Array<{ role: string; content: string }> }
-      const messages = session.messages ?? []
-      const text = messages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => `[${m.role}]: ${m.content}`)
-        .join('\n\n')
-      await navigator.clipboard.writeText(text)
-      setCopiedField('chat')
-      setTimeout(() => setCopiedField(null), 1500)
-    } catch { /* silently fail */ }
-  }, [selectedId])
-
-  // Centralized keyboard shortcut registry
-  const shortcuts = useMemo<ShortcutDef[]>(() => [
-    { key: 'n', category: 'Actions', description: 'New chat', action: handleNewChat },
-    { key: 'j', category: 'Navigation', description: 'Next session', action: () => navigateSession(1) },
-    { key: 'k', category: 'Navigation', description: 'Previous session', action: () => navigateSession(-1) },
-    { key: 'e', category: 'Navigation', description: 'Next employee', action: cycleEmployee },
-    { key: 'Backspace', category: 'Actions', description: 'Delete session', action: () => { if (selectedId && window.confirm('Delete this session?')) handleDeleteSession(selectedId) }, enabled: !!selectedId },
-    { key: 'Delete', category: 'Actions', description: 'Delete session', action: () => { if (selectedId && window.confirm('Delete this session?')) handleDeleteSession(selectedId) }, enabled: !!selectedId },
-    { key: 'c', category: 'Actions', description: 'Copy chat', action: copyChat, enabled: !!selectedId },
-    { key: 'Escape', category: 'Navigation', description: 'Close overlay', action: () => {
-      if (showShortcutOverlay) setShowShortcutOverlay(false)
-      else if (showMoreMenu) setShowMoreMenu(false)
-    }},
-    { key: '/', category: 'Actions', description: 'Focus chat', action: () => {
-      const el = document.getElementById('chat-textarea')
-      if (el) el.focus()
-    }},
-    { key: '?', category: 'Help', description: 'Keyboard shortcuts', action: () => setShowShortcutOverlay(v => !v) },
-    { key: 'w', modifiers: ['meta'], category: 'Actions', description: 'Close tab', action: () => {
-      if (chatTabs.activeIndex >= 0) chatTabs.closeTab(chatTabs.activeIndex)
-    }},
-    { key: '[', modifiers: ['meta', 'shift'], category: 'Navigation', description: 'Previous tab', action: () => chatTabs.prevTab() },
-    { key: ']', modifiers: ['meta', 'shift'], category: 'Navigation', description: 'Next tab', action: () => chatTabs.nextTab() },
-    ...Array.from({ length: 9 }, (_, i) => ({
-      key: String(i + 1),
-      modifiers: ['meta' as const, 'alt' as const],
-      category: 'Navigation' as const,
-      description: `Tab ${i + 1}`,
-      action: () => chatTabs.switchTab(i),
-    })),
-  ], [handleNewChat, navigateSession, cycleEmployee, copyChat, selectedId, showShortcutOverlay, showMoreMenu, chatTabs])
-
-  useKeyboardShortcuts(shortcuts)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [chatTabs])
 
   // When active tab changes, sync selectedId
   useEffect(() => {
@@ -392,12 +315,11 @@ function ChatPage() {
           )}
           <div className="my-0.5 border-t border-border" />
           <button
-            onClick={() => { setShowMoreMenu(false); if (selectedId && window.confirm('Delete this session?')) handleDeleteSession(selectedId) }}
+            onClick={() => { setShowMoreMenu(false); setConfirmDelete(true) }}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--system-red)] transition-colors hover:bg-accent"
           >
             <Trash2 className="size-3.5" />
-            <span className="flex-1">Delete Session</span>
-            <kbd className="font-mono text-[10px] text-[var(--text-quaternary)]">⌫</kbd>
+            Delete Session
           </button>
         </div>
       )}
@@ -407,6 +329,15 @@ function ChatPage() {
   // Build toolbar actions to pass into tab bar (desktop only content)
   const toolbarActions = (
     <>
+      <button
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-[var(--accent)] transition-colors hover:bg-accent lg:hidden"
+        onClick={() => setMobileView('sidebar')}
+        aria-label="Back to sessions"
+      >
+        <ChevronLeft className="size-4" />
+        Back
+      </button>
+
       {selectedId && (
         <div className="flex items-center gap-0.5 rounded-full bg-[var(--fill-tertiary)] p-0.5">
           <button
@@ -434,30 +365,6 @@ function ChatPage() {
         </div>
       )}
 
-      {selectedId && (
-        <button
-          onClick={() => setActivityOpen(v => !v)}
-          aria-label="Toggle activity panel"
-          className={cn(
-            "flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all",
-            activityOpen
-              ? "bg-[var(--accent)] text-white"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent"
-          )}
-        >
-          <Activity className="size-3" />
-          <span className="hidden xl:inline">Activity</span>
-          {activityEvents.length > 0 && (
-            <span className={cn(
-              "min-w-[16px] rounded-full px-1 text-center text-[10px] font-semibold leading-[16px]",
-              activityOpen ? "bg-white/25" : "bg-[var(--fill-tertiary)]"
-            )}>
-              {activityEvents.length > 99 ? '99+' : activityEvents.length}
-            </span>
-          )}
-        </button>
-      )}
-
       <div className="hidden lg:block">{moreMenu}</div>
 
       {copiedField && (
@@ -471,100 +378,83 @@ function ChatPage() {
 
   return (
     <PageLayout mobileHeaderActions={moreMenu}>
-      <div className="flex overflow-hidden h-full">
-        <div
-          className="hidden h-full shrink-0 overflow-hidden lg:block"
-          style={{
-            width: sidebarCollapsed ? 0 : 280,
-            transition: 'width 200ms ease-in-out',
-          }}
-        >
-          <div className="h-full w-[280px]">
-            <ChatSidebar
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              onNewChat={handleNewChat}
-              onDelete={handleDeleteSession}
-              onSessionsLoaded={handleSessionsLoaded}
-              onEmployeeSessionsAvailable={handleEmployeeSessionsAvailable}
-              onOrderComputed={handleOrderComputed}
-            />
-          </div>
+      <div className="flex h-[calc(100%-48px)] overflow-hidden lg:h-full">
+        <div className="hidden h-full w-[280px] shrink-0 lg:block">
+          <ChatSidebar
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onNewChat={handleNewChat}
+            onDelete={handleDeleteSession}
+            onSessionsLoaded={handleSessionsLoaded}
+            onEmployeeSessionsAvailable={handleEmployeeSessionsAvailable}
+          />
         </div>
 
-        <div className="min-w-0 flex-1 flex-col overflow-hidden bg-background flex">
+        <div
+          className={mobileView === 'sidebar' ? 'block lg:hidden' : 'hidden'}
+          style={{ width: '100%', height: '100%' }}
+        >
+          <ChatSidebar
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onNewChat={handleNewChat}
+            onDelete={handleDeleteSession}
+            onSessionsLoaded={handleSessionsLoaded}
+            onEmployeeSessionsAvailable={handleEmployeeSessionsAvailable}
+          />
+        </div>
+
+        <div
+          className={cn(
+            "min-w-0 flex-1 flex-col overflow-hidden bg-background",
+            mobileView === 'sidebar' ? 'hidden lg:flex' : 'flex'
+          )}
+        >
           <ChatTabBar
             tabs={chatTabs.tabs}
             activeIndex={chatTabs.activeIndex}
             onSwitch={chatTabs.switchTab}
             onClose={chatTabs.closeTab}
             onNew={handleNewChat}
-            onPin={chatTabs.pinTab}
-            onMove={chatTabs.moveTab}
             toolbarActions={toolbarActions}
-            sidebarCollapsed={mobileView === 'chat' || sidebarCollapsed}
-            onToggleSidebar={toggleSidebar}
           />
 
-          <div
-            className={mobileView === 'sidebar' ? 'flex-1 overflow-hidden lg:hidden' : 'hidden'}
-          >
-            <ChatSidebar
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              onNewChat={handleNewChat}
-              onDelete={handleDeleteSession}
-              onSessionsLoaded={handleSessionsLoaded}
-              onEmployeeSessionsAvailable={handleEmployeeSessionsAvailable}
-              onOrderComputed={handleOrderComputed}
-            />
-          </div>
-
-          <div className={cn(
-            "flex-1 overflow-hidden flex flex-col relative",
-            mobileView === 'sidebar' ? 'hidden lg:flex' : 'flex'
-          )}>
-            <ChatPane
-              sessionId={selectedId}
-              isActive={true}
-              onFocus={() => {}}
-              onSessionCreated={handleSessionCreated}
-              onSessionMetaChange={handleSessionMetaChange}
-              onRefresh={handleRefresh}
-              portalName={portalName}
-              subscribe={subscribe}
-              connectionSeq={connectionSeq}
-              skillsVersion={skillsVersion}
-              events={events}
-              viewMode={viewMode}
-              getOnboardingPrompt={stubSessionRef.current ? handleGetOnboardingPrompt : undefined}
-              isStubSession={stubSessionRef.current}
-              onStubCleared={handleStubCleared}
-              focusTrigger={focusTrigger}
-              onShortcutsClick={() => setShowShortcutOverlay(true)}
-            />
-
-            {/* Activity panel */}
-            {activityOpen && selectedId && (
-              <SessionActivityPanel
-                events={activityEvents}
-                sessionTitle={sessionMeta?.title || sessionMeta?.employee || 'Session'}
-                sessionStatus={sessionStatus}
-                connected={connected}
-                onClose={() => setActivityOpen(false)}
-              />
-            )}
-          </div>
+          <ChatPane
+            sessionId={selectedId}
+            isActive={true}
+            onFocus={() => {}}
+            onSessionCreated={handleSessionCreated}
+            onSessionMetaChange={handleSessionMetaChange}
+            onRefresh={handleRefresh}
+            portalName={portalName}
+            subscribe={subscribe}
+            connectionSeq={connectionSeq}
+            skillsVersion={skillsVersion}
+            events={events}
+            viewMode={viewMode}
+            getOnboardingPrompt={stubSessionRef.current ? handleGetOnboardingPrompt : undefined}
+            isStubSession={stubSessionRef.current}
+            onStubCleared={handleStubCleared}
+          />
         </div>
       </div>
 
-      {showShortcutOverlay && (
-        <ShortcutOverlay
-          shortcuts={shortcuts}
-          onClose={() => setShowShortcutOverlay(false)}
-        />
-      )}
-
+      <Dialog open={confirmDelete && !!selectedId} onOpenChange={setConfirmDelete}>
+        <DialogContent showCloseButton={false} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Session?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete the session and all its messages.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => selectedId && handleDeleteSession(selectedId)}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   )
 }
