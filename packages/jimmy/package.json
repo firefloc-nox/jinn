@@ -1,7 +1,7 @@
 {
   "name": "jinn-cli",
-  "version": "0.8.0",
-  "description": "Lightweight AI gateway daemon orchestrating Claude Code, Codex, and Gemini CLI",
+  "version": "0.7.2",
+  "description": "Lightweight AI gateway daemon orchestrating Claude Code and Codex",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "build": "tsc && rm -rf dist/web && cp -r ../web/out dist/web 2>/dev/null || true",
-    "dev": "tsc --watch & node --watch-path=src --watch-path=bin dist/bin/jimmy.js start",
+    "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -32,7 +32,6 @@
     "discord.js": "^14.25.1",
     "js-yaml": "^4.1.0",
     "node-cron": "^3.0.0",
-    "node-telegram-bot-api": "^0.67.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "uuid": "^11.1.0",
@@ -44,7 +43,6 @@
     "@types/js-yaml": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/node-cron": "^3.0.0",
-    "@types/node-telegram-bot-api": "^0.64.14",
     "@types/qrcode": "^1.5.6",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.0",
