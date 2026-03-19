@@ -1072,9 +1072,12 @@ export async function handleApiRequest(
       return json(res, { lines });
     }
 
-    // POST /api/connectors/discord/incoming — receive proxied Discord messages from primary instance
-    if (method === "POST" && pathname === "/api/connectors/discord/incoming") {
-      const connector = context.connectors.get("discord");
+    // POST /api/connectors/:id/incoming — receive proxied Discord messages from primary instance
+    // Supports both the legacy /api/connectors/discord/incoming and named instance ids
+    params = matchRoute("/api/connectors/:id/incoming", pathname);
+    if (method === "POST" && params && params.id) {
+      // Try the exact instance id first, then fall back to "discord" for the legacy path
+      const connector = context.connectors.get(params.id) ?? (params.id === "discord" ? context.connectors.get("discord") : undefined);
       if (!connector) return notFound(res);
       if (!("deliverMessage" in connector)) {
         return json(res, { error: "Discord connector is not in remote mode" }, 400);
@@ -1102,7 +1105,7 @@ export async function handleApiRequest(
       );
 
       const incomingMsg: IncomingMessage = {
-        connector: "discord",
+        connector: params.id,
         source: "discord",
         sessionKey: body.sessionKey,
         channel: body.channel,
@@ -1122,9 +1125,11 @@ export async function handleApiRequest(
       return json(res, { status: "delivered" });
     }
 
-    // POST /api/connectors/discord/proxy — proxy connector operations from remote instances
-    if (method === "POST" && pathname === "/api/connectors/discord/proxy") {
-      const connector = context.connectors.get("discord");
+    // POST /api/connectors/:id/proxy — proxy connector operations from remote instances
+    // Supports both the legacy /api/connectors/discord/proxy and named instance ids
+    params = matchRoute("/api/connectors/:id/proxy", pathname);
+    if (method === "POST" && params && params.id) {
+      const connector = context.connectors.get(params.id) ?? (params.id === "discord" ? context.connectors.get("discord") : undefined);
       if (!connector) return notFound(res);
 
       const _parsed = await readJsonBody(req, res);
@@ -1198,8 +1203,11 @@ export async function handleApiRequest(
 
     // GET /api/connectors — list available connectors
     if (method === "GET" && pathname === "/api/connectors") {
-      const connectors = Array.from(context.connectors.values()).map((connector) => ({
+      const connectors = Array.from(context.connectors.entries()).map(([instanceId, connector]) => ({
         name: connector.name,
+        instanceId,
+        // Include employee binding if the connector exposes it
+        employee: (connector as any).config?.employee ?? undefined,
         ...connector.getHealth(),
       }));
       return json(res, connectors);
