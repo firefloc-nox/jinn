@@ -23,7 +23,7 @@ export interface Employee {
   name: string;
   displayName: string;
   department: string;
-  rank: "executive" | "manager" | "senior" | "employee";
+  rank: "executive" | "director" | "manager" | "lead" | "senior" | "employee";
   engine: string;
   model: string;
   persona: string;
@@ -34,6 +34,27 @@ export interface Employee {
 export interface OrgData {
   departments: string[];
   employees: string[];
+}
+
+export interface OrgTreeEmployee {
+  name: string;
+  displayName: string;
+  rank: string;
+}
+
+export interface OrgTreeNode {
+  name: string;
+  displayName: string;
+  description?: string;
+  path: string;
+  manager?: OrgTreeEmployee;
+  employees: OrgTreeEmployee[];
+  children: OrgTreeNode[];
+}
+
+export interface OrgTreeData {
+  tree: OrgTreeNode[];
+  unassigned: string[];
 }
 
 const BASE =
@@ -128,6 +149,7 @@ export const api = {
   triggerCronJob: (id: string) =>
     post<Record<string, unknown>>(`/api/cron/${id}/trigger`, {}),
   getOrg: () => get<OrgData>("/api/org"),
+  getOrgTree: () => get<OrgTreeData>("/api/org/tree"),
   getEmployee: (name: string) => get<Employee>(`/api/org/employees/${name}`),
   updateEmployee: (name: string, data: { alwaysNotify?: boolean }) =>
     patch<{ status: string }>(`/api/org/employees/${name}`, data),
