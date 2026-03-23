@@ -34,6 +34,8 @@ export interface DiscordConnectorConfig {
   channelRouting?: Record<string, string>;
   /** If set, this instance proxies all Discord operations through the primary instance at this URL */
   proxyVia?: string;
+  /** Employee bound to this connector instance */
+  employee?: string;
 }
 
 export class DiscordConnector implements Connector {
@@ -81,6 +83,10 @@ export class DiscordConnector implements Connector {
 
   onMessage(handler: (msg: IncomingMessage) => void): void {
     this.handler = handler;
+  }
+
+  getEmployee(): string | undefined {
+    return this.config.employee;
   }
 
   async start(): Promise<void> {

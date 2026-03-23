@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Employee, JinnConfig } from "../shared/types.js";
 import { JINN_HOME, ORG_DIR, CRON_JOBS, DOCS_DIR } from "../shared/paths.js";
-import { scanOrgFull } from "../gateway/org.js";
+import { scanOrgFull, type OrgScanResult } from "../gateway/org.js";
 
 /**
  * Token budget strategy:
@@ -69,12 +69,15 @@ export function buildContext(opts: {
   const operatorName = opts.operatorName || opts.config?.portal?.operatorName;
   const language = opts.language || opts.config?.portal?.language || "English";
 
+  // Single org scan shared by chain-of-command and services context
+  const orgScan = opts.employee ? scanOrgFull() : undefined;
+
   // ── ESSENTIAL: Identity ─────────────────────────────────────
   if (opts.employee) {
     sections.push({
       tier: Tier.ESSENTIAL,
       marker: "# You are",
-      content: buildEmployeeIdentity(opts.employee, portalName, language),
+      content: buildEmployeeIdentity(opts.employee, portalName, language, orgScan),
       summary: `# You are ${opts.employee.displayName}\nEmployee: ${opts.employee.name}, ${opts.employee.department}, ${opts.employee.rank}`,
     });
   } else {
@@ -149,7 +152,7 @@ export function buildContext(opts: {
 
   // ── STANDARD: Cross-department services ────────────────────
   if (opts.employee) {
-    const svcCtx = buildServicesContext(opts.employee, gatewayUrl);
+    const svcCtx = buildServicesContext(opts.employee, gatewayUrl, orgScan);
     if (svcCtx) {
       sections.push({
         tier: Tier.STANDARD,
@@ -217,7 +220,7 @@ export function buildContext(opts: {
 // Section builders
 // ═══════════════════════════════════════════════════════════════
 
-function buildEmployeeIdentity(employee: Employee, portalName: string, language: string): string {
+function buildEmployeeIdentity(employee: Employee, portalName: string, language: string, orgScan?: OrgScanResult): string {
   const languageInstruction = language !== "English"
     ? `\n**Language**: Always respond in ${language}. All your communication with the user must be in ${language}.\n`
     : "";
@@ -250,15 +253,15 @@ You can:
 
 Be proactive, take initiative, and deliver results. You're not a chatbot — you're a worker.
 
-${buildChainOfCommand(employee)}`;
+${buildChainOfCommand(employee, portalName, orgScan)}`;
 }
 
 /**
  * Build the chain of command section for an employee's system prompt.
  */
-function buildChainOfCommand(employee: Employee): string {
+function buildChainOfCommand(employee: Employee, portalName: string, orgScan?: OrgScanResult): string {
   try {
-    const { employees, departments } = scanOrgFull();
+    const { employees, departments } = orgScan ?? scanOrgFull();
     const orgPath = employee.orgPath;
     if (!orgPath) return "";
 
@@ -313,8 +316,8 @@ function buildChainOfCommand(employee: Employee): string {
       escalation.push(mgr ? mgr.displayName : current);
       current = mgr?.reportsTo;
     }
-    escalation.push("Noxis (COO)");
-    // Deduplicate in case Noxis is already in the chain
+    escalation.push(`${portalName} (COO)`);
+    // Deduplicate in case the COO is already in the chain
     const uniqueEscalation = [...new Set(escalation)];
     lines.push(`- **Escalation path**: ${uniqueEscalation.join(" -> ")}`);
 
@@ -699,9 +702,9 @@ When a department has 3+ employees, promote a senior to **manager**. Managers ha
 Your current session ID is in the "Current session" section above. Use it as \`parentSessionId\`.${effortOverrideNote}`;
 }
 
-function buildServicesContext(employee: Employee, gatewayUrl: string): string | null {
+function buildServicesContext(employee: Employee, gatewayUrl: string, orgScan?: OrgScanResult): string | null {
   try {
-    const { departments, services } = scanOrgFull();
+    const { departments, services } = orgScan ?? scanOrgFull();
     if (services.size === 0) return null;
 
     const lines: string[] = ["## Available cross-department services"];

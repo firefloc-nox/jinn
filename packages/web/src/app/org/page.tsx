@@ -40,7 +40,7 @@ export default function OrgPage() {
     setError(null);
     Promise.all([
       api.getOrg(),
-      api.getOrgTree().catch(() => null),
+      api.getOrgTree().catch((err) => { console.warn("Failed to load org tree:", err); return null; }),
     ])
       .then(async ([data, treeData]: [OrgData, OrgTreeData | null]) => {
         const details = await Promise.all(

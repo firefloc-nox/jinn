@@ -999,7 +999,6 @@ export async function handleApiRequest(
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           error: `Service "${service}" not found`,
-          available: Array.from(services.keys()),
         }));
         return;
       }
@@ -1029,9 +1028,13 @@ ${prompt}
 ---
 Handle this request as a priority task from your chain of command. Assign it to the most appropriate team member and deliver the result.`;
 
+      // Use the target manager's configured engine, falling back to default
+      const targetManager = empMap.get(targetDept.manager);
+      const targetEngine = targetManager?.engine || context.config.defaultEngine || "claude";
+
       const session = createSession({
         prompt: crossBrief,
-        engine: "claude",
+        engine: targetEngine,
         source: "cross-request",
         sourceRef: `cross:${fromEmployee}:${service}`,
         employee: targetDept.manager,
@@ -1504,7 +1507,7 @@ Handle this request as a priority task from your chain of command. Assign it to 
         name: connector.name,
         instanceId,
         // Include employee binding if the connector exposes it
-        employee: (connector as any).config?.employee ?? undefined,
+        employee: connector.getEmployee?.() ?? undefined,
         ...connector.getHealth(),
       }));
       return json(res, connectors);
