@@ -37,8 +37,9 @@ export function scanOrgFull(): OrgScanResult {
       if (entry.isDirectory()) {
         scanEmployees(fullPath);
       } else if (
-        entry.name.endsWith(".yaml") &&
-        entry.name !== "department.yaml"
+        (entry.name.endsWith(".yaml") || entry.name.endsWith(".yml")) &&
+        entry.name !== "department.yaml" &&
+        entry.name !== "department.yml"
       ) {
         try {
           const raw = fs.readFileSync(fullPath, "utf-8");
@@ -80,7 +81,7 @@ export function scanOrgFull(): OrgScanResult {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         scanDepartments(fullPath);
-      } else if (entry.name === "department.yaml") {
+      } else if (entry.name === "department.yaml" || entry.name === "department.yml") {
         try {
           const raw = fs.readFileSync(fullPath, "utf-8");
           const data = yaml.load(raw) as any;

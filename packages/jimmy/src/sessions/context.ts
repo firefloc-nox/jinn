@@ -237,13 +237,13 @@ You can:
 
 Be proactive, take initiative, and deliver results. You're not a chatbot — you're a worker.
 
-${buildChainOfCommand(employee)}`;
+${buildChainOfCommand(employee, portalName)}`;
 }
 
 /**
  * Build the chain of command section for an employee's system prompt.
  */
-function buildChainOfCommand(employee: Employee): string {
+function buildChainOfCommand(employee: Employee, portalName: string): string {
   try {
     const { employees, departments } = scanOrgFull();
     const orgPath = employee.orgPath;
@@ -300,8 +300,8 @@ function buildChainOfCommand(employee: Employee): string {
       escalation.push(mgr ? mgr.displayName : current);
       current = mgr?.reportsTo;
     }
-    escalation.push("Noxis (COO)");
-    // Deduplicate in case Noxis is already in the chain
+    escalation.push(`${portalName} (COO)`);
+    // Deduplicate in case the COO is already in the chain
     const uniqueEscalation = [...new Set(escalation)];
     lines.push(`- **Escalation path**: ${uniqueEscalation.join(" -> ")}`);
 
