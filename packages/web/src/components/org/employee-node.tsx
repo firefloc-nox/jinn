@@ -51,8 +51,8 @@ export function DepartmentGroupNode({ data }: NodeProps) {
       <div className="absolute top-[14px] left-[16px] text-[11px] font-[600] tracking-[0.06em] uppercase text-[var(--text-tertiary)] select-none opacity-60 pointer-events-none">
         {label}
       </div>
-      <Handle type="target" position={Position.Top} style={{ opacity: 0, top: 0 }} />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, bottom: 0 }} />
+      <Handle type="target" position={Position.Top} style={{ opacity: 0, top: 0, pointerEvents: "none" }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, bottom: 0, pointerEvents: "none" }} />
     </div>
   )
 }
