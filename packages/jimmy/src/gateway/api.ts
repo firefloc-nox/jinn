@@ -2156,11 +2156,14 @@ async function runWebSession(
       sessionId: currentSession.id,
     });
 
-    const engineConfig = currentSession.engine === "codex"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const engineConfig: any = currentSession.engine === "codex"
       ? config.engines.codex
       : currentSession.engine === "gemini"
         ? config.engines.gemini ?? config.engines.claude
-        : config.engines.claude;
+        : currentSession.engine === "local"
+          ? config.engines.local ?? { url: "http://localhost:11434", model: "" }
+          : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     // Resolve MCP servers for this session
