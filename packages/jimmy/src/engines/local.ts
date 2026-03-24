@@ -107,9 +107,11 @@ export class LocalEngine implements InterruptibleEngine {
           error = `Local engine HTTP ${response.status}: ${body}`;
           logger.error(`[local] ${error}`);
           // Retryable errors during model JIT loading:
+          // - 404: LM Studio returns this when server API is momentarily unavailable
           // - 500-503: server errors while model is loading
           // - 400 "Model unloaded": LM Studio returns this when model was evicted
-          const isRetryable = (response.status >= 500 && response.status <= 503)
+          const isRetryable = response.status === 404
+            || (response.status >= 500 && response.status <= 503)
             || (response.status === 400 && body.includes("unloaded"));
           if (attempt < MAX_RETRIES && isRetryable) {
             lastError = error;
@@ -147,7 +149,6 @@ export class LocalEngine implements InterruptibleEngine {
           // Keep the last (possibly incomplete) line in the buffer
           buffer = lines.pop() ?? "";
 
-          let sseEventType = "";
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith(":")) continue;
