@@ -631,6 +631,16 @@ export async function startGateway(
         currentConfig = loadConfig();
         apiContext.config = currentConfig;
         setActivityLimits(currentConfig);
+
+        // Hot-reload local engine registration
+        if (currentConfig.engines?.local?.url) {
+          const localEngine = new LocalEngine(currentConfig.engines.local);
+          engines.set("local", localEngine);
+          logger.info(`Local engine reloaded: ${currentConfig.engines.local.model} @ ${currentConfig.engines.local.url}`);
+        } else {
+          engines.delete("local");
+        }
+
         logger.info("Config reloaded successfully");
         emit("config:reloaded", {});
       } catch (err) {

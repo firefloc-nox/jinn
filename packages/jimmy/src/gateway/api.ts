@@ -1378,6 +1378,8 @@ Handle this request as a priority task from your chain of command. Assign it to 
         "stt",
         "skills",
         "remotes",
+        "kanban",
+        "activity",
       ];
       const unknownKeys = Object.keys(body).filter((k) => !KNOWN_KEYS.includes(k));
       if (unknownKeys.length > 0) {
@@ -2180,6 +2182,21 @@ async function runWebSession(
       });
     }, 5000);
 
+    // ── Resolve slash-command skills ────────────────────────────
+    // If the prompt starts with /skillname, inject the SKILL.md content
+    let resolvedPrompt = prompt;
+    const slashMatch = prompt.match(/^\/([a-z][a-z0-9-]*)\s*(.*)?$/s);
+    if (slashMatch) {
+      const skillName = slashMatch[1];
+      const skillArgs = (slashMatch[2] || "").trim();
+      const skillPath = path.join(JINN_HOME, "skills", skillName, "SKILL.md");
+      if (fs.existsSync(skillPath)) {
+        const skillContent = fs.readFileSync(skillPath, "utf-8");
+        resolvedPrompt = `Execute the following skill:\n\n<skill name="${skillName}">\n${skillContent}\n</skill>\n\n${skillArgs ? `Arguments: ${skillArgs}` : "Run the skill now."}`;
+        logger.info(`Resolved slash command /${skillName} → injected SKILL.md (${skillContent.length} chars)`);
+      }
+    }
+
     const syncSinceIso = (currentSession.transportMeta as any)?.claudeSyncSince;
     const syncSinceMs = typeof syncSinceIso === "string" ? new Date(syncSinceIso).getTime() : NaN;
     const syncRequested = currentSession.engine === "claude" && typeof syncSinceIso === "string" && Number.isFinite(syncSinceMs);
@@ -2191,7 +2208,7 @@ async function runWebSession(
         const transcript = sinceMessages.slice(-20).join("\n\n");
         return `We temporarily switched to GPT due to a Claude usage limit. Sync your context with this transcript (most recent last), then respond to the last USER message.\n\n${transcript}`;
       })()
-      : prompt;
+      : resolvedPrompt;
 
     const result = await engine.run({
       prompt: promptToRun,
