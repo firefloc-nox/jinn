@@ -18,9 +18,25 @@ function groupMessages(messages: Message[]): MessageItem[] {
     if (messages[i].role === 'assistant' && messages[i].toolCall) {
       const toolMsgs: Message[] = []
       const start = i
-      while (i < messages.length && messages[i].role === 'assistant' && messages[i].toolCall) {
-        toolMsgs.push(messages[i])
-        i++
+      // Absorb consecutive tool calls AND interstitial assistant text that sits
+      // between tool runs (e.g. flushed streaming text like "Let me check…").
+      // This keeps the chat clean — all tool activity collapses into one pill.
+      while (i < messages.length) {
+        if (messages[i].role === 'assistant' && messages[i].toolCall) {
+          toolMsgs.push(messages[i])
+          i++
+        } else if (
+          messages[i].role === 'assistant' &&
+          !messages[i].toolCall &&
+          i + 1 < messages.length &&
+          messages[i + 1].role === 'assistant' &&
+          messages[i + 1].toolCall
+        ) {
+          // Skip interstitial assistant text between tool calls
+          i++
+        } else {
+          break
+        }
       }
       items.push({ kind: 'tool-group', msgs: toolMsgs, startIndex: start })
     } else {

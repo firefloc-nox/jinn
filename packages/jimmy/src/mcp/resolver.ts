@@ -113,7 +113,7 @@ function buildAvailableServers(config: McpGlobalConfig): Record<string, McpServe
       command: "node",
       args: [scriptPath],
       env: {
-        JINN_GATEWAY_URL: `http://127.0.0.1:${process.env.JINN_PORT || "7777"}`,
+        JINN_GATEWAY_URL: `http://127.0.0.1:${process.env.JINN_PORT || "7778"}`,
       },
     };
   }

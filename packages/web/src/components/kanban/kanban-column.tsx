@@ -48,7 +48,7 @@ export function KanbanColumn({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="flex flex-col min-w-[280px] max-w-[320px] flex-[1_0_280px] h-full rounded-[var(--radius-lg)] transition-[background,border-color] duration-200 ease-[var(--ease-smooth)]"
+      className="flex flex-col min-w-[200px] max-w-[320px] flex-[1_0_200px] h-full rounded-[var(--radius-lg)] transition-[background,border-color] duration-200 ease-[var(--ease-smooth)]"
       style={{
         background: isDragOver ? 'var(--fill-secondary)' : 'var(--fill-tertiary)',
         border: isDragOver

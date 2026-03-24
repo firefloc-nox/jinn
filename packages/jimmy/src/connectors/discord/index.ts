@@ -34,8 +34,10 @@ export interface DiscordConnectorConfig {
   channelRouting?: Record<string, string>;
   /** If set, this instance proxies all Discord operations through the primary instance at this URL */
   proxyVia?: string;
-  /** Employee bound to this connector instance */
-  employee?: string;
+  /** Bot user IDs whose messages should NOT be ignored (e.g. Senex bot pinging Vox) */
+  allowBotIds?: string[];
+  /** Only process messages in threads, ignore top-level channel messages */
+  threadOnly?: boolean;
 }
 
 export class DiscordConnector implements Connector {
@@ -237,8 +239,12 @@ export class DiscordConnector implements Connector {
   }
 
   private async handleMessage(message: Message): Promise<void> {
-    // Ignore bots (including self)
-    if (message.author.bot) return;
+    // Ignore bots (including self), unless they are in the allowBotIds list
+    if (message.author.bot) {
+      const allowedBots = this.config.allowBotIds ?? [];
+      if (!allowedBots.includes(message.author.id)) return;
+      logger.debug(`Allowing message from bot ${message.author.username} (${message.author.id}) — in allowBotIds`);
+    }
     logger.debug(`Discord message from ${message.author.username} in channel ${message.channel.id}`);
 
     // Ignore old messages on boot
@@ -260,6 +266,9 @@ export class DiscordConnector implements Connector {
 
     // Channel restriction — only respond in a specific channel (+ DMs always allowed)
     if (this.config.channelId && message.channel.id !== this.config.channelId && !message.channel.isDMBased()) return;
+
+    // Thread-only mode — ignore messages that are not in threads
+    if (this.config.threadOnly && !message.channel.isThread()) return;
 
     // User allowlist
     if (this.allowedUserIds.size > 0 && !this.allowedUserIds.has(message.author.id)) return;

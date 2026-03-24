@@ -1,7 +1,7 @@
 "use client"
 
-import { COLUMNS } from '@/lib/kanban/types'
-import type { KanbanTicket, TicketStatus } from '@/lib/kanban/types'
+import { DEFAULT_COLUMNS } from '@/lib/kanban/types'
+import type { KanbanTicket, TicketStatus, KanbanColumn as KanbanColumnDef } from '@/lib/kanban/types'
 import type { KanbanStore } from '@/lib/kanban/store'
 import { getTicketsByStatus } from '@/lib/kanban/store'
 import type { Employee } from '@/lib/api'
@@ -11,6 +11,7 @@ import { TicketCard } from './ticket-card'
 interface KanbanBoardProps {
   tickets: KanbanStore
   employees: Employee[]
+  columns?: KanbanColumnDef[]
   onTicketClick: (ticket: KanbanTicket) => void
   onMoveTicket: (ticketId: string, status: TicketStatus) => void
   onCreateTicket: () => void
@@ -21,12 +22,14 @@ interface KanbanBoardProps {
 export function KanbanBoard({
   tickets,
   employees,
+  columns,
   onTicketClick,
   onMoveTicket,
   onCreateTicket,
   onDeleteTicket,
   filterEmployeeId,
 }: KanbanBoardProps) {
+  const cols = columns ?? DEFAULT_COLUMNS
   return (
     <div
       style={{
@@ -39,7 +42,7 @@ export function KanbanBoard({
         WebkitOverflowScrolling: 'touch',
       }}
     >
-      {COLUMNS.map((column) => {
+      {cols.map((column) => {
         const allColumnTickets = getTicketsByStatus(tickets, column.id)
         const columnTickets = filterEmployeeId
           ? allColumnTickets.filter((t) => t.assigneeId === filterEmployeeId)

@@ -125,6 +125,9 @@ export function ChatPane({
       if (event === 'session:delta') {
         const deltaType = String(p.type || 'text')
 
+        // Thinking deltas belong only in the Activity Panel — skip in main chat
+        if (deltaType === 'thinking') return
+
         if (deltaType === 'text') {
           const chunk = String(p.content || '')
           streamingTextRef.current += chunk

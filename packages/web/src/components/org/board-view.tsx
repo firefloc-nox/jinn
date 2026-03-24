@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { STATUS_ALIASES } from "@/lib/kanban/types";
 
 interface Task {
   id?: string;
@@ -26,11 +27,30 @@ const priorityStyles: Record<string, React.CSSProperties> = {
 };
 
 const columnLabels: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  inProgress: "In Progress",
+  backlog: "Backlog",
+  rd: "R&D",
+  "rd-done": "R&D Done",
+  "dev-ready": "Dev Ready",
+  dev: "Dev",
+  "dev-review": "Dev Review",
+  "test-ready": "Test Ready",
+  test: "Test",
+  "test-passed": "Test Passed",
   done: "Done",
+  blocked: "Blocked",
 };
+
+/** Normalize status strings: underscores → hyphens, then resolve legacy aliases */
+function normalizeStatus(status: string): string {
+  const normalized = (status || "backlog").replace(/_/g, "-");
+  return STATUS_ALIASES[normalized] || normalized;
+}
+
+/** Ordered column IDs matching the pipeline workflow from config.yaml */
+const ORDERED_COLUMNS = [
+  "backlog", "rd", "rd-done", "dev-ready", "dev",
+  "dev-review", "test-ready", "test", "test-passed", "done", "blocked",
+];
 
 function TaskCard({ task }: { task: Task }) {
   const pStyle = priorityStyles[task.priority || "low"] || priorityStyles.low;
@@ -114,35 +134,45 @@ export function BoardView({ department }: { department: string }) {
 
   if (!board) return null;
 
-  // Support both { columns: { todo: [], ... } } and { tasks: [] } shapes
-  let columns: Record<string, Task[]>;
+  // Support three shapes: flat array (API), { tasks: [] }, or { columns: { ... } }
+  let taskList: Task[];
 
-  if (board.columns && typeof board.columns === "object") {
-    columns = board.columns;
+  if (Array.isArray(board)) {
+    // API returns a flat array of tasks
+    taskList = board as unknown as Task[];
   } else if (Array.isArray(board.tasks)) {
-    columns = {
-      todo: board.tasks.filter((t) => t.status === "todo"),
-      in_progress: board.tasks.filter(
-        (t) => t.status === "in_progress" || t.status === "inProgress",
-      ),
-      done: board.tasks.filter((t) => t.status === "done"),
-    };
+    taskList = board.tasks;
+  } else if (board.columns && typeof board.columns === "object") {
+    // Legacy { columns: { todo: [...], done: [...] } } format — flatten
+    taskList = Object.entries(board.columns).flatMap(([status, tasks]) =>
+      tasks.map((t) => ({ ...t, status: t.status || status })),
+    );
   } else {
-    columns = { todo: [], in_progress: [], done: [] };
+    taskList = [];
   }
 
-  const orderedKeys = ["todo", "in_progress", "inProgress", "done"];
-  const displayColumns = orderedKeys
-    .filter((key) => columns[key] !== undefined)
+  // Normalize statuses and group into columns
+  const columns: Record<string, Task[]> = {};
+  for (const colId of ORDERED_COLUMNS) {
+    columns[colId] = [];
+  }
+  for (const task of taskList) {
+    const status = normalizeStatus(task.status);
+    if (!columns[status]) columns[status] = [];
+    columns[status].push({ ...task, status });
+  }
+
+  // Build display columns in workflow order (always show all standard columns)
+  const displayColumns = ORDERED_COLUMNS
     .map((key) => ({
       key,
       title: columnLabels[key] || key,
-      tasks: columns[key],
+      tasks: columns[key] || [],
     }));
 
-  // If no ordered keys found, show whatever columns exist
-  if (displayColumns.length === 0) {
-    for (const [key, tasks] of Object.entries(columns)) {
+  // Append any non-standard statuses not in ORDERED_COLUMNS
+  for (const [key, tasks] of Object.entries(columns)) {
+    if (!ORDERED_COLUMNS.includes(key) && tasks.length > 0) {
       displayColumns.push({
         key,
         title: columnLabels[key] || key,

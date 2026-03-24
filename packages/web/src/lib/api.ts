@@ -210,6 +210,8 @@ export const api = {
     post<{ status: string }>(`/api/sessions/${sessionId}/queue/pause`, {}),
   resumeSessionQueue: (sessionId: string) =>
     post<{ status: string }>(`/api/sessions/${sessionId}/queue/resume`, {}),
+  getSessionEvents: (id: string) =>
+    get<{ sessionId: string; events: Array<{ id: string; type: string; content: string | null; toolName: string | null; toolArgs: Record<string, unknown> | null; thinkingText: string | null; resultContent: string | null; timestamp: number }> }>(`/api/sessions/${id}/events`),
   getSessionTranscript: (id: string) =>
     get<TranscriptEntry[]>(`/api/sessions/${id}/transcript`),
   uploadFile: async (file: File): Promise<UploadedFile> => {
@@ -219,4 +221,6 @@ export const api = {
     if (!res.ok) throw new Error(await extractErrorMessage(res))
     return res.json()
   },
+  getLocalModels: () =>
+    get<{ data?: Array<{ id: string }> }>("/api/engines/local/models"),
 };

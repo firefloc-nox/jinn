@@ -68,7 +68,7 @@ export class ClaudeEngine implements InterruptibleEngine {
           `Claude engine retry ${attempt}/${MAX_RETRIES} for session ${opts.sessionId || "unknown"} after ${delayMs}ms`,
         );
         // Emit a status delta so the UI knows we're retrying
-        opts.onStream?.({ type: "status", content: `Retrying (attempt ${attempt + 1}/${MAX_RETRIES + 1})...` });
+        opts.onStream?.({ type: "status", content: `Retrying (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`, timestamp: Date.now() });
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
 
@@ -120,7 +120,10 @@ export class ClaudeEngine implements InterruptibleEngine {
     // and would consume the prompt as another config path
     args.push(prompt);
 
-    if (opts.mcpConfigPath) args.push("--mcp-config", opts.mcpConfigPath);
+    if (opts.mcpConfigPath) {
+      args.push("--mcp-config", opts.mcpConfigPath);
+      logger.info(`Claude engine: injecting --mcp-config ${opts.mcpConfigPath}`);
+    }
     if (opts.cliFlags?.length) args.push(...opts.cliFlags);
 
     const bin = opts.bin || "claude";
@@ -152,6 +155,9 @@ export class ClaudeEngine implements InterruptibleEngine {
       let rateLimitInfo: EngineRateLimitInfo | undefined;
       let lineCount = 0;
       let inTool = false;
+      let currentToolName = "";
+      let currentToolId = "";
+      let currentToolArgs = "";
 
       const STDERR_MAX = 10 * 1024; // 10KB rolling window for error reporting
 
@@ -182,13 +188,39 @@ export class ClaudeEngine implements InterruptibleEngine {
 
             if (parsed.type === "__tool_start") {
               inTool = true;
+              currentToolName = parsed.delta.toolName || "unknown";
+              currentToolId = parsed.delta.toolId || "";
+              currentToolArgs = "";
+              // Emit a single tool_use event — args will be attached at tool_end
               onStream(parsed.delta);
               continue;
             }
 
             if (parsed.type === "__tool_end") {
               inTool = false;
-              onStream(parsed.delta);
+              // Emit a complete tool_result with the buffered args
+              let parsedArgs: Record<string, unknown> | undefined;
+              if (currentToolArgs) {
+                try { parsedArgs = JSON.parse(currentToolArgs) as Record<string, unknown>; } catch { parsedArgs = { raw: currentToolArgs }; }
+              }
+              onStream({
+                type: "tool_result",
+                content: "",
+                toolName: currentToolName,
+                toolId: currentToolId,
+                toolArgs: parsedArgs,
+                resultContent: "",
+                timestamp: Date.now(),
+              });
+              currentToolName = "";
+              currentToolId = "";
+              currentToolArgs = "";
+              continue;
+            }
+
+            // Buffer tool input JSON chunks instead of emitting them
+            if (parsed.delta.type === "tool_use" && inTool && parsed.type === "delta") {
+              currentToolArgs += parsed.delta.content || "";
               continue;
             }
 
@@ -243,7 +275,7 @@ export class ClaudeEngine implements InterruptibleEngine {
               opts.resumeSessionId,
               rateLimitInfo,
             );
-            if (extracted.error) opts.onStream?.({ type: "error", content: extracted.error });
+            if (extracted.error) opts.onStream?.({ type: "error", content: extracted.error, timestamp: Date.now() });
             resolve(extracted);
             return;
           }
@@ -302,7 +334,7 @@ export class ClaudeEngine implements InterruptibleEngine {
             opts.resumeSessionId,
             rateLimitInfo,
           );
-          if (extracted.error) opts.onStream?.({ type: "error", content: extracted.error });
+          if (extracted.error) opts.onStream?.({ type: "error", content: extracted.error, timestamp: Date.now() });
           resolve(extracted);
           return;
         }
@@ -311,7 +343,7 @@ export class ClaudeEngine implements InterruptibleEngine {
         if (!streaming && stdout.trim()) {
           try {
             const parsedResult = this.parseClaudeJsonOutput(stdout, opts.resumeSessionId);
-            if (parsedResult.error) opts.onStream?.({ type: "error", content: parsedResult.error });
+            if (parsedResult.error) opts.onStream?.({ type: "error", content: parsedResult.error, timestamp: Date.now() });
             resolve(parsedResult);
             return;
           } catch {
@@ -323,7 +355,7 @@ export class ClaudeEngine implements InterruptibleEngine {
         logger.error(errMsg);
 
         // Emit error delta so WebSocket clients see the failure immediately
-        opts.onStream?.({ type: "error", content: errMsg });
+        opts.onStream?.({ type: "error", content: errMsg, timestamp: Date.now() });
 
         resolve({
           sessionId: opts.resumeSessionId || "",
@@ -340,7 +372,7 @@ export class ClaudeEngine implements InterruptibleEngine {
         }
         const errMsg = `Failed to spawn Claude CLI: ${err.message}`;
         logger.error(errMsg);
-        opts.onStream?.({ type: "error", content: errMsg });
+        opts.onStream?.({ type: "error", content: errMsg, timestamp: Date.now() });
         reject(new Error(errMsg));
       });
     });
@@ -394,8 +426,32 @@ export class ClaudeEngine implements InterruptibleEngine {
             .filter((b) => b.type === "text" && typeof b.text === "string")
             .map((b) => b.text as string);
           if (textParts.length > 0) {
-            return { type: "delta", delta: { type: "text_snapshot", content: textParts.join("") } };
+            return { type: "delta", delta: { type: "text_snapshot", content: textParts.join(""), timestamp: Date.now() } };
           }
+        }
+      }
+      return null;
+    }
+
+    // Tool result messages (role: "user" with tool_result content blocks from Claude Code)
+    if (msgType === "tool_result" || (msg.role === "user" && Array.isArray(msg.content))) {
+      const content = msg.content as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(content)) {
+        const toolResult = content.find((b) => b.type === "tool_result");
+        if (toolResult) {
+          const resultText = typeof toolResult.content === "string"
+            ? toolResult.content
+            : JSON.stringify(toolResult.content || "").slice(0, 2000);
+          return {
+            type: "delta",
+            delta: {
+              type: "tool_result",
+              content: resultText,
+              resultContent: resultText,
+              toolId: String(toolResult.tool_use_id || ""),
+              timestamp: Date.now(),
+            },
+          };
         }
       }
       return null;
@@ -413,20 +469,38 @@ export class ClaudeEngine implements InterruptibleEngine {
           const toolId = String(block.id || "");
           return {
             type: "__tool_start",
-            delta: { type: "tool_use", content: `Using ${toolName}`, toolName, toolId },
+            delta: { type: "tool_use", content: `Using ${toolName}`, toolName, toolId, timestamp: Date.now() },
+          };
+        }
+        if (block?.type === "thinking") {
+          return {
+            type: "delta",
+            delta: { type: "thinking", content: "", thinkingText: "", timestamp: Date.now() },
           };
         }
       } else if (eventType === "content_block_delta") {
         const delta = event.delta as Record<string, unknown> | undefined;
         if (!delta) return null;
+        if (delta.type === "thinking_delta") {
+          const thinking = String(delta.thinking || "");
+          if (thinking) {
+            return { type: "delta", delta: { type: "thinking", content: thinking, thinkingText: thinking, timestamp: Date.now() } };
+          }
+        }
+        if (delta.type === "input_json_delta" && inTool) {
+          const partialJson = String(delta.partial_json || "");
+          if (partialJson) {
+            return { type: "delta", delta: { type: "tool_use", content: partialJson, timestamp: Date.now() } };
+          }
+        }
         if (delta.type === "text_delta" && !inTool) {
           const text = String(delta.text || "");
           if (text) {
-            return { type: "delta", delta: { type: "text", content: text } };
+            return { type: "delta", delta: { type: "text", content: text, timestamp: Date.now() } };
           }
         }
       } else if (eventType === "content_block_stop" && inTool) {
-        return { type: "__tool_end", delta: { type: "tool_result", content: "" } };
+        return { type: "__tool_end", delta: { type: "tool_result", content: "", timestamp: Date.now() } };
       }
       return null;
     }

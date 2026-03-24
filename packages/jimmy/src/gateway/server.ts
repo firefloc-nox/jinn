@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { JinnConfig, Connector, Employee } from "../shared/types.js";
+import type { JinnConfig, Connector, Employee, InterruptibleEngine } from "../shared/types.js";
 import { loadConfig } from "../shared/config.js";
 import { configureLogger, logger } from "../shared/logger.js";
 import { initDb, recoverStaleSessions, recoverStaleQueueItems, getInterruptedSessions, listSessions, updateSession } from "../sessions/registry.js";
@@ -13,7 +13,8 @@ import { SessionManager, type RouteOptions } from "../sessions/manager.js";
 import { ClaudeEngine } from "../engines/claude.js";
 import { CodexEngine } from "../engines/codex.js";
 import { GeminiEngine } from "../engines/gemini.js";
-import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
+import { LocalEngine } from "../engines/local.js";
+import { handleApiRequest, resumePendingWebQueueItems, setActivityLimits, type ApiContext } from "./api.js";
 import { ensureFilesDir } from "./files.js";
 import { initStt } from "../stt/stt.js";
 import { startWatchers, stopWatchers, syncSkillSymlinks } from "./watcher.js";
@@ -133,10 +134,22 @@ export async function startGateway(
   const claudeEngine = new ClaudeEngine();
   const codexEngine = new CodexEngine();
   const geminiEngine = new GeminiEngine();
-  const engines = new Map<string, InstanceType<typeof ClaudeEngine> | InstanceType<typeof CodexEngine> | InstanceType<typeof GeminiEngine>>();
+  const engines = new Map<string, InterruptibleEngine>();
   engines.set("claude", claudeEngine);
   engines.set("codex", codexEngine);
   engines.set("gemini", geminiEngine);
+
+  // Register local engine if configured (OpenAI-compatible API, e.g. LM Studio)
+  // Expected config.yaml:
+  //   engines:
+  //     local:
+  //       url: "http://localhost:1234"
+  //       model: "qwen3.5-9b-mlx"
+  if (config.engines?.local?.url) {
+    const localEngine = new LocalEngine(config.engines.local);
+    engines.set("local", localEngine);
+    logger.info(`Local engine registered: ${config.engines.local.model} @ ${config.engines.local.url}`);
+  }
 
   // Derive connector names from config
   const connectorNames: string[] = [];
@@ -501,6 +514,7 @@ export async function startGateway(
 
   // Mutable config reference for hot-reload
   let currentConfig = config;
+  setActivityLimits(currentConfig);
 
   const startTime = Date.now();
 
@@ -616,6 +630,7 @@ export async function startGateway(
       try {
         currentConfig = loadConfig();
         apiContext.config = currentConfig;
+        setActivityLimits(currentConfig);
         logger.info("Config reloaded successfully");
         emit("config:reloaded", {});
       } catch (err) {

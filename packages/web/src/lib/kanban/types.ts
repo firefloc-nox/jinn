@@ -1,6 +1,6 @@
 // Kanban board types
 
-export type TicketStatus = 'backlog' | 'todo' | 'in-progress' | 'review' | 'done'
+export type TicketStatus = string
 
 export type TicketPriority = 'low' | 'medium' | 'high'
 
@@ -22,17 +22,39 @@ export interface KanbanTicket {
 }
 
 export interface KanbanColumn {
-  id: TicketStatus
+  id: string
   title: string
 }
 
-export const COLUMNS: KanbanColumn[] = [
+/** Default columns — overridden at runtime by config.yaml kanban.columns */
+export const DEFAULT_COLUMNS: KanbanColumn[] = [
   { id: 'backlog', title: 'Backlog' },
-  { id: 'todo', title: 'To Do' },
-  { id: 'in-progress', title: 'In Progress' },
-  { id: 'review', title: 'Review' },
+  { id: 'rd', title: 'R&D' },
+  { id: 'rd-done', title: 'R&D Done' },
+  { id: 'dev-ready', title: 'Dev Ready' },
+  { id: 'dev', title: 'Dev' },
+  { id: 'dev-review', title: 'Dev Review' },
+  { id: 'test-ready', title: 'Test Ready' },
+  { id: 'test', title: 'Test' },
+  { id: 'test-passed', title: 'Test Passed' },
   { id: 'done', title: 'Done' },
+  { id: 'blocked', title: 'Blocked' },
 ]
+
+/**
+ * Maps legacy/agent-created statuses to the correct pipeline column.
+ * Agents may create tickets with old statuses (todo, in_progress, review, etc.)
+ * that need to be mapped into the real pipeline.
+ */
+export const STATUS_ALIASES: Record<string, string> = {
+  'todo': 'backlog',
+  'to-do': 'backlog',
+  'in-progress': 'dev',
+  'in_progress': 'dev',
+  'review': 'dev-review',
+  'testing': 'test',
+  'qa': 'test',
+}
 
 export const PRIORITY_COLORS: Record<TicketPriority, string> = {
   low: 'var(--system-green)',

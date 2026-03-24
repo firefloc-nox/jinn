@@ -258,8 +258,11 @@ export class SessionManager {
           : this.config.engines.claude;
       if (session.engine === "claude") {
         const mcpConfig = resolveMcpServers(this.config.mcp, employee);
-        if (Object.keys(mcpConfig.mcpServers).length > 0) {
+        const mcpServerNames = Object.keys(mcpConfig.mcpServers);
+        logger.info(`MCP resolve for ${session.id} (employee: ${employee?.name || "none"}): ${mcpServerNames.length} servers [${mcpServerNames.join(", ")}]`);
+        if (mcpServerNames.length > 0) {
           mcpConfigPath = writeMcpConfigFile(mcpConfig, session.id);
+          logger.info(`MCP config written to ${mcpConfigPath}`);
         }
       }
 

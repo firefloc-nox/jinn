@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { Plus } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { Employee, OrgData } from '@/lib/api'
-import type { KanbanTicket, TicketStatus, TicketPriority } from '@/lib/kanban/types'
+import type { KanbanTicket, TicketStatus, TicketPriority, KanbanColumn as KanbanColumnDef } from '@/lib/kanban/types'
+import { DEFAULT_COLUMNS, STATUS_ALIASES } from '@/lib/kanban/types'
 import {
   loadTickets,
   saveTickets,
@@ -85,6 +86,7 @@ export default function KanbanPage() {
   const [selectedTicket, setSelectedTicket] = useState<KanbanTicket | null>(null)
   const [filterEmployeeId, setFilterEmployeeId] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<KanbanTicket | null>(null)
+  const [columns, setColumns] = useState<KanbanColumnDef[]>(DEFAULT_COLUMNS)
 
   /** Sync tickets to the gateway API, grouped by department */
   const syncToApi = useCallback(async (store: KanbanStore) => {
@@ -133,7 +135,14 @@ export default function KanbanPage() {
     setLoading(true)
     setError(null)
 
-    // Load employees from API, then load board data from department boards
+    // Load kanban columns from config, then employees and board data
+    api.getConfig().then((cfg) => {
+      const kanban = cfg?.kanban as { columns?: Array<{ id: string; title: string }> } | undefined
+      if (kanban?.columns && Array.isArray(kanban.columns) && kanban.columns.length > 0) {
+        setColumns(kanban.columns)
+      }
+    }).catch(() => { /* config unavailable — use defaults */ })
+
     api
       .getOrg()
       .then(async (data: OrgData) => {
@@ -173,16 +182,9 @@ export default function KanbanPage() {
             }>
             if (Array.isArray(board)) {
               for (const item of board) {
-                // Map board.json status to kanban statuses
-                const statusMap: Record<string, TicketStatus> = {
-                  todo: 'todo',
-                  'in_progress': 'in-progress',
-                  'in-progress': 'in-progress',
-                  done: 'done',
-                  backlog: 'backlog',
-                  review: 'review',
-                }
-                const status = statusMap[item.status] || 'todo'
+                // Normalize status: underscores → hyphens, then resolve legacy aliases
+                const normalized = (item.status || 'backlog').replace(/_/g, '-')
+                const status = STATUS_ALIASES[normalized] || normalized
                 const priorityMap: Record<string, TicketPriority> = {
                   low: 'low',
                   medium: 'medium',
@@ -450,6 +452,7 @@ export default function KanbanPage() {
               <KanbanBoard
                 tickets={tickets}
                 employees={employees}
+                columns={columns}
                 onTicketClick={handleTicketClick}
                 onMoveTicket={handleMoveTicket}
                 onCreateTicket={() => setCreateOpen(true)}
@@ -473,6 +476,7 @@ export default function KanbanPage() {
           <TicketDetailPanel
             ticket={selectedTicket}
             employees={employees}
+            columns={columns}
             onClose={() => setSelectedTicket(null)}
             onStatusChange={(status) => handleMoveTicket(selectedTicket.id, status)}
             onAssigneeChange={(name) => handleAssigneeChange(selectedTicket.id, name)}

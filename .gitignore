@@ -6,3 +6,9 @@ dist/
 .env
 .env.local
 .worktrees/
+
+# OS
+.DS_Store
+
+# Runtime DBs
+*.db

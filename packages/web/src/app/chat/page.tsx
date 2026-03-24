@@ -16,7 +16,9 @@ import { useSettings } from '@/app/settings-provider'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
-import { Check, EllipsisVertical, Trash2 } from 'lucide-react'
+import { Check, EllipsisVertical, Trash2, Activity } from 'lucide-react'
+import { useSessionActivity } from '@/hooks/use-session-activity'
+import { SessionActivityPanel } from '@/components/activity/session-activity-panel'
 
 function getOnboardingPrompt(portalName: string, userMessage: string) {
   return `This is your first time being activated. The user just set up ${portalName} and opened the web dashboard for the first time.
@@ -110,7 +112,9 @@ function ChatPage() {
   const [focusTrigger, setFocusTrigger] = useState(0)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const sessionPickerRef = useRef<HTMLDivElement>(null)
-  const { events, connectionSeq, skillsVersion, subscribe } = useGateway()
+  const [activityOpen, setActivityOpen] = useState(false)
+  const { events, connected, connectionSeq, skillsVersion, subscribe } = useGateway()
+  const { events: activityEvents, sessionStatus } = useSessionActivity({ sessionId: selectedId, subscribe })
   const chatTabs = useChatTabs()
   const searchParams = useSearchParams()
   const onboardingTriggered = useRef(false)
@@ -430,6 +434,30 @@ function ChatPage() {
         </div>
       )}
 
+      {selectedId && (
+        <button
+          onClick={() => setActivityOpen(v => !v)}
+          aria-label="Toggle activity panel"
+          className={cn(
+            "flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all",
+            activityOpen
+              ? "bg-[var(--accent)] text-white"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent"
+          )}
+        >
+          <Activity className="size-3" />
+          <span className="hidden xl:inline">Activity</span>
+          {activityEvents.length > 0 && (
+            <span className={cn(
+              "min-w-[16px] rounded-full px-1 text-center text-[10px] font-semibold leading-[16px]",
+              activityOpen ? "bg-white/25" : "bg-[var(--fill-tertiary)]"
+            )}>
+              {activityEvents.length > 99 ? '99+' : activityEvents.length}
+            </span>
+          )}
+        </button>
+      )}
+
       <div className="hidden lg:block">{moreMenu}</div>
 
       {copiedField && (
@@ -493,7 +521,7 @@ function ChatPage() {
           </div>
 
           <div className={cn(
-            "flex-1 overflow-hidden flex flex-col",
+            "flex-1 overflow-hidden flex flex-col relative",
             mobileView === 'sidebar' ? 'hidden lg:flex' : 'flex'
           )}>
             <ChatPane
@@ -515,6 +543,17 @@ function ChatPage() {
               focusTrigger={focusTrigger}
               onShortcutsClick={() => setShowShortcutOverlay(true)}
             />
+
+            {/* Activity panel */}
+            {activityOpen && selectedId && (
+              <SessionActivityPanel
+                events={activityEvents}
+                sessionTitle={sessionMeta?.title || sessionMeta?.employee || 'Session'}
+                sessionStatus={sessionStatus}
+                connected={connected}
+                onClose={() => setActivityOpen(false)}
+              />
+            )}
           </div>
         </div>
       </div>

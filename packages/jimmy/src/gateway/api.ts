@@ -25,6 +25,11 @@ import {
   cancelAllPendingQueueItems,
   listAllPendingQueueItems,
   getFile,
+  insertSessionEvent,
+  getSessionEvents,
+  trimSessionEvents,
+  trimGlobalEvents,
+  purgeOldEvents,
 } from "../sessions/registry.js";
 import {
   CONFIG_PATH,
@@ -37,6 +42,7 @@ import {
   FILES_DIR,
 } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
+import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
 import { getSttStatus, downloadModel, transcribe as sttTranscribe, resolveLanguages, WHISPER_LANGUAGES } from "../stt/stt.js";
 import { JINN_HOME } from "../shared/paths.js";
 import { resolveEffort } from "../shared/effort.js";
@@ -60,6 +66,37 @@ export interface ApiContext {
   emit: (event: string, payload: unknown) => void;
   connectors: Map<string, import("../shared/types.js").Connector>;
   reloadConnectorInstances?: () => Promise<{ started: string[]; stopped: string[]; errors: string[] }>;
+}
+
+/** Insert a session event and enforce configured activity limits.
+ *  Same signature as insertSessionEvent — reads limits from activityLimits. */
+let activityLimits: { maxEventsPerSession: number; maxEventsGlobal: number; retentionDays: number } = {
+  maxEventsPerSession: 0, maxEventsGlobal: 0, retentionDays: 0,
+};
+
+export function setActivityLimits(config: JinnConfig): void {
+  const activity = (config as unknown as Record<string, unknown>).activity as
+    | { maxEventsPerSession?: number; maxEventsGlobal?: number; retentionDays?: number }
+    | undefined;
+  activityLimits = {
+    maxEventsPerSession: activity?.maxEventsPerSession || 0,
+    maxEventsGlobal: activity?.maxEventsGlobal || 0,
+    retentionDays: activity?.retentionDays || 0,
+  };
+}
+
+function insertAndTrimEvent(event: Parameters<typeof insertSessionEvent>[0]): void {
+  insertSessionEvent(event);
+  if (activityLimits.maxEventsPerSession) {
+    trimSessionEvents(event.sessionId, activityLimits.maxEventsPerSession);
+  }
+  // Global/retention trim runs probabilistically to avoid overhead
+  if (activityLimits.maxEventsGlobal && Math.random() < 0.02) {
+    trimGlobalEvents(activityLimits.maxEventsGlobal);
+  }
+  if (activityLimits.retentionDays && Math.random() < 0.01) {
+    purgeOldEvents(activityLimits.retentionDays);
+  }
 }
 
 export function resumePendingWebQueueItems(context: ApiContext): void {
@@ -350,6 +387,7 @@ export async function handleApiRequest(
           claude: { model: config.engines.claude.model, available: true },
           codex: { model: config.engines.codex.model, available: true },
           ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
+          ...(config.engines.local ? { local: { model: config.engines.local.model, url: config.engines.local.url, available: true } } : {}),
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
@@ -432,6 +470,15 @@ export async function handleApiRequest(
       if (!updated) return notFound(res);
       context.emit("session:updated", { sessionId: params.id });
       return json(res, serializeSession(updated, context));
+    }
+
+    // GET /api/sessions/:id/events
+    params = matchRoute("/api/sessions/:id/events", pathname);
+    if (method === "GET" && params) {
+      const session = getSession(params.id);
+      if (!session) return notFound(res);
+      const events = getSessionEvents(params.id);
+      return json(res, { sessionId: params.id, events });
     }
 
     // DELETE /api/sessions/:id
@@ -1030,7 +1077,7 @@ Handle this request as a priority task from your chain of command. Assign it to 
 
       // Use the target manager's configured engine, falling back to default
       const targetManager = empMap.get(targetDept.manager);
-      const targetEngine = targetManager?.engine || context.config.defaultEngine || "claude";
+      const targetEngine = targetManager?.engine || context.config.engines.default || "claude";
 
       const session = createSession({
         prompt: crossBrief,
@@ -1247,6 +1294,27 @@ Handle this request as a priority task from your chain of command. Assign it to 
       removeFromManifest(params.name);
       logger.info(`Skill removed via API: ${params.name}`);
       return json(res, { status: "removed", name: params.name });
+    }
+
+    // GET /api/engines/local/models — proxy to local engine's /v1/models
+    if (method === "GET" && pathname === "/api/engines/local/models") {
+      const config = context.getConfig();
+      const localUrl = config.engines?.local?.url;
+      if (!localUrl) {
+        return json(res, { error: "Local engine not configured" }, 400);
+      }
+      try {
+        const upstream = await fetch(`${localUrl.replace(/\/+$/, "")}/v1/models`);
+        if (!upstream.ok) {
+          const body = await upstream.text().catch(() => "");
+          return json(res, { error: `Upstream ${upstream.status}: ${body}` }, upstream.status);
+        }
+        const data = await upstream.json();
+        return json(res, data);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return json(res, { error: `Connection failed: ${msg}` }, 502);
+      }
     }
 
     // GET /api/config
@@ -2073,6 +2141,7 @@ async function runWebSession(
     employee = findEmployee(currentSession.employee, registry);
   }
 
+  let mcpConfigPath: string | undefined;
   try {
 
     const systemPrompt = buildContext({
@@ -2091,6 +2160,17 @@ async function runWebSession(
         ? config.engines.gemini ?? config.engines.claude
         : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
+
+    // Resolve MCP servers for this session
+    if (currentSession.engine === "claude") {
+      const mcpConfig = resolveMcpServers(config.mcp, employee);
+      const mcpServerNames = Object.keys(mcpConfig.mcpServers);
+      logger.info(`MCP resolve for web session ${currentSession.id} (employee: ${employee?.name || "none"}): ${mcpServerNames.length} servers [${mcpServerNames.join(", ")}]`);
+      if (mcpServerNames.length > 0) {
+        mcpConfigPath = writeMcpConfigFile(mcpConfig, currentSession.id);
+        logger.info(`MCP config written to ${mcpConfigPath}`);
+      }
+    }
 
     let lastHeartbeatAt = 0;
     const runHeartbeat = setInterval(() => {
@@ -2122,6 +2202,7 @@ async function runWebSession(
       model: currentSession.model ?? engineConfig.model,
       effortLevel,
       cliFlags: employee?.cliFlags,
+      mcpConfigPath,
       attachments: attachments?.length ? attachments : undefined,
       sessionId: currentSession.id,
       onStream: (delta) => {
@@ -2139,7 +2220,24 @@ async function runWebSession(
             type: delta.type,
             content: delta.content,
             toolName: delta.toolName,
+            toolArgs: delta.toolArgs,
+            thinkingText: delta.thinkingText,
+            resultContent: delta.resultContent,
+            timestamp: delta.timestamp,
           });
+          // Persist event for replay (skip high-frequency text/text_snapshot deltas)
+          if (delta.type !== "text" && delta.type !== "text_snapshot" && delta.type !== "status") {
+            insertAndTrimEvent({
+              sessionId: currentSession.id,
+              type: delta.type,
+              content: delta.content,
+              toolName: delta.toolName,
+              toolArgs: delta.toolArgs,
+              thinkingText: delta.thinkingText,
+              resultContent: delta.resultContent,
+              timestamp: delta.timestamp ?? Date.now(),
+            });
+          }
         } catch (err) {
           logger.warn(`Failed to emit stream delta for session ${currentSession.id}: ${err instanceof Error ? err.message : err}`);
         }
@@ -2203,19 +2301,22 @@ async function runWebSession(
             `⚠️ Claude usage limit reached. Session ${currentSession.id}${currentSession.employee ? ` (${currentSession.employee})` : ""} switching to GPT.`,
           );
 
-          const fallbackConfig = config.engines.codex;
+          // Resolve fallback engine config — supports codex and local engines
+          const fallbackConfig = fallbackName === "local" && config.engines.local
+            ? { bin: "", model: config.engines.local.model }
+            : config.engines.codex;
           const fallbackEffort = resolveEffort(fallbackConfig, currentSession, employee);
-          const codexResume = typeof engineSessions.codex === "string" ? (engineSessions.codex as string) : undefined;
+          const fallbackResume = typeof engineSessions[fallbackName] === "string" ? (engineSessions[fallbackName] as string) : undefined;
           const history = getMessages(currentSession.id)
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
           const historyText = history.slice(-12).join("\n\n");
-          const fallbackPrompt = codexResume
+          const fallbackPrompt = fallbackResume
             ? prompt
             : `Continue this conversation and respond to the last USER message.\n\nConversation so far:\n\n${historyText}`;
           const fallbackResult = await fallbackEngine.run({
             prompt: fallbackPrompt,
-            resumeSessionId: codexResume,
+            resumeSessionId: fallbackResume,
             systemPrompt,
             cwd: JINN_HOME,
             bin: fallbackConfig.bin,
@@ -2229,7 +2330,23 @@ async function runWebSession(
                 type: delta.type,
                 content: delta.content,
                 toolName: delta.toolName,
+                toolArgs: delta.toolArgs,
+                thinkingText: delta.thinkingText,
+                resultContent: delta.resultContent,
+                timestamp: delta.timestamp,
               });
+              if (delta.type !== "text" && delta.type !== "text_snapshot" && delta.type !== "status") {
+                insertAndTrimEvent({
+                  sessionId: currentSession.id,
+                  type: delta.type,
+                  content: delta.content,
+                  toolName: delta.toolName,
+                  toolArgs: delta.toolArgs,
+                  thinkingText: delta.thinkingText,
+                  resultContent: delta.resultContent,
+                  timestamp: delta.timestamp ?? Date.now(),
+                });
+              }
             },
           });
 
@@ -2237,10 +2354,10 @@ async function runWebSession(
             insertMessage(currentSession.id, "assistant", fallbackResult.result);
           }
 
-          // Persist Codex thread id so future fallbacks can resume it
+          // Persist fallback engine session id so future fallbacks can resume it
           const nextEngineSessions = { ...engineSessions };
           if (fallbackResult.sessionId) {
-            nextEngineSessions.codex = fallbackResult.sessionId;
+            nextEngineSessions[fallbackName] = fallbackResult.sessionId;
           }
           const metaAfter = { ...(getSession(currentSession.id)?.transportMeta || nextMeta) } as Record<string, unknown>;
           metaAfter.engineSessions = nextEngineSessions;
@@ -2350,6 +2467,7 @@ async function runWebSession(
             model: current.model ?? engineConfig.model,
             effortLevel,
             cliFlags: employee?.cliFlags,
+            mcpConfigPath,
             sessionId: currentSession.id,
             onStream: (delta) => {
               context.emit("session:delta", {
@@ -2357,7 +2475,23 @@ async function runWebSession(
                 type: delta.type,
                 content: delta.content,
                 toolName: delta.toolName,
+                toolArgs: delta.toolArgs,
+                thinkingText: delta.thinkingText,
+                resultContent: delta.resultContent,
+                timestamp: delta.timestamp,
               });
+              if (delta.type !== "text" && delta.type !== "text_snapshot" && delta.type !== "status") {
+                insertAndTrimEvent({
+                  sessionId: currentSession.id,
+                  type: delta.type,
+                  content: delta.content,
+                  toolName: delta.toolName,
+                  toolArgs: delta.toolArgs,
+                  thinkingText: delta.thinkingText,
+                  resultContent: delta.resultContent,
+                  timestamp: delta.timestamp ?? Date.now(),
+                });
+              }
             },
           });
 
@@ -2499,5 +2633,7 @@ async function runWebSession(
       error: errMsg,
     });
     logger.error(`Web session ${currentSession.id} error: ${errMsg}`);
+  } finally {
+    if (mcpConfigPath) cleanupMcpConfigFile(currentSession.id);
   }
 }

@@ -2,8 +2,8 @@
 
 import { useEffect, useRef } from 'react'
 import type { Employee } from '@/lib/api'
-import type { KanbanTicket, TicketStatus, TicketPriority } from '@/lib/kanban/types'
-import { PRIORITY_COLORS, COLUMNS } from '@/lib/kanban/types'
+import type { KanbanTicket, TicketStatus, TicketPriority, KanbanColumn as KanbanColumnDef } from '@/lib/kanban/types'
+import { PRIORITY_COLORS, DEFAULT_COLUMNS } from '@/lib/kanban/types'
 import { EmployeePicker } from './employee-picker'
 
 /* Priority badge */
@@ -23,8 +23,9 @@ function PriorityBadge({ priority }: { priority: TicketPriority }) {
 }
 
 /* Status badge */
-function StatusBadge({ status }: { status: TicketStatus }) {
-  const label = COLUMNS.find(c => c.id === status)?.title ?? status
+function StatusBadge({ status, columns }: { status: TicketStatus; columns?: KanbanColumnDef[] }) {
+  const cols = columns ?? DEFAULT_COLUMNS
+  const label = cols.find(c => c.id === status)?.title ?? status
   return (
     <span className="text-[length:var(--text-caption2)] font-semibold text-[var(--text-secondary)] bg-[var(--fill-tertiary)] px-[var(--space-2)] py-[2px] rounded-[var(--radius-sm)] uppercase tracking-[0.3px]">
       {label}
@@ -36,6 +37,7 @@ function StatusBadge({ status }: { status: TicketStatus }) {
 interface TicketDetailPanelProps {
   ticket: KanbanTicket
   employees: Employee[]
+  columns?: KanbanColumnDef[]
   onClose: () => void
   onStatusChange: (status: TicketStatus) => void
   onAssigneeChange: (employeeName: string | null) => void
@@ -45,11 +47,13 @@ interface TicketDetailPanelProps {
 export function TicketDetailPanel({
   ticket,
   employees,
+  columns,
   onClose,
   onStatusChange,
   onAssigneeChange,
   onDelete,
 }: TicketDetailPanelProps) {
+  const cols = columns ?? DEFAULT_COLUMNS
   const closeRef = useRef<HTMLButtonElement>(null)
 
   // Escape key to close
@@ -104,7 +108,7 @@ export function TicketDetailPanel({
             </h2>
 
             <div className="flex items-center gap-[var(--space-3)] mt-[var(--space-2)]">
-              <StatusBadge status={ticket.status} />
+              <StatusBadge status={ticket.status} columns={cols} />
               <PriorityBadge priority={ticket.priority} />
             </div>
 
@@ -129,7 +133,7 @@ export function TicketDetailPanel({
               Move to
             </div>
             <div className="flex gap-[var(--space-1)] flex-wrap">
-              {COLUMNS.map(col => {
+              {cols.map(col => {
                 const isCurrent = col.id === ticket.status
                 return (
                   <button

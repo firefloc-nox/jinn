@@ -1,10 +1,14 @@
-export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error";
+export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "thinking" | "status" | "error";
 
 export interface StreamDelta {
   type: StreamDeltaType;
   content: string;
   toolName?: string;
   toolId?: string;
+  toolArgs?: Record<string, unknown>;
+  thinkingText?: string;
+  resultContent?: string;
+  timestamp?: number;
 }
 
 export interface Engine {
@@ -355,6 +359,8 @@ export interface JinnConfig {
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    /** OpenAI-compatible local engine (e.g. LM Studio, llama.cpp). Config: { url, model } */
+    local?: { url: string; model: string };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;
@@ -374,7 +380,7 @@ export interface JinnConfig {
     /** What to do when Claude hits a usage/rate limit. Default: "fallback" */
     rateLimitStrategy?: "wait" | "fallback";
     /** Engine to use when rateLimitStrategy="fallback". Default: "codex" */
-    fallbackEngine?: "codex";
+    fallbackEngine?: "codex" | "local" | string;
   };
   cron?: {
     defaultDelivery?: CronDelivery;

@@ -6,7 +6,8 @@ export type KanbanStore = Record<string, KanbanTicket>
 
 const STORAGE_KEY = 'jinn-kanban'
 
-const VALID_STATUSES = new Set<TicketStatus>(['backlog', 'todo', 'in-progress', 'review', 'done'])
+// No hardcoded status validation — any string status is accepted.
+// Columns are configured via config.yaml kanban.columns.
 const VALID_PRIORITIES = new Set<TicketPriority>(['low', 'medium', 'high'])
 const VALID_WORK_STATES = new Set<WorkState>(['idle', 'starting', 'working', 'done', 'failed'])
 
@@ -15,7 +16,7 @@ function sanitizeTicket(id: string, raw: Record<string, unknown>): KanbanTicket 
   // Require essential fields
   if (typeof raw.title !== 'string' || !raw.title) return null
 
-  const status = (VALID_STATUSES.has(raw.status as TicketStatus) ? raw.status : 'backlog') as TicketStatus
+  const status = (typeof raw.status === 'string' && raw.status ? raw.status : 'backlog') as TicketStatus
   const priority = (VALID_PRIORITIES.has(raw.priority as TicketPriority) ? raw.priority : 'medium') as TicketPriority
   const workState = (VALID_WORK_STATES.has(raw.workState as WorkState) ? raw.workState : 'idle') as WorkState
 
@@ -47,9 +48,9 @@ export function loadTickets(): KanbanStore {
       if (!ticket) continue // Skip corrupted entries
 
       // Recover tickets stuck mid-work (e.g. page reload during streaming).
-      // Reset them to todo/idle so they can be re-triggered.
+      // Reset them to backlog/idle so they can be re-triggered.
       if (ticket.workState === 'working' || ticket.workState === 'starting') {
-        ticket.status = 'todo'
+        ticket.status = 'backlog'
         ticket.workState = 'idle'
       }
 
