@@ -1166,7 +1166,7 @@ export default function SettingsPage() {
                         type="button"
                         className="px-[var(--space-2)] py-[var(--space-1)] rounded-[var(--radius-sm)] text-[length:var(--text-caption1)] border border-[var(--separator)] bg-[var(--material-thin)] hover:bg-[var(--material-thick)] transition-colors"
                         onClick={() => {
-                          updateConfig(["engines", "local", "url"], "http://localhost:1234")
+                          updateConfig(["engines", "local", "url"], "http://127.0.0.1:1234")
                         }}
                       >
                         LM Studio (1234)

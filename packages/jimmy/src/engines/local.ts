@@ -24,7 +24,7 @@ export interface LocalEngineConfig {
 }
 
 interface SSEChoice {
-  delta?: { content?: string; role?: string };
+  delta?: { content?: string; reasoning_content?: string; role?: string };
   finish_reason?: string | null;
 }
 
@@ -124,6 +124,10 @@ export class LocalEngine implements InterruptibleEngine {
             try {
               const chunk: SSEChunk = JSON.parse(json);
               const delta = chunk.choices?.[0]?.delta;
+              // Some models (qwen3.5) put reasoning in a separate field
+              if (delta?.reasoning_content) {
+                // Skip reasoning tokens — only emit final content
+              }
               if (delta?.content) {
                 fullText += delta.content;
                 opts.onStream?.({ type: "text", content: delta.content });
@@ -135,6 +139,9 @@ export class LocalEngine implements InterruptibleEngine {
           }
         }
       }
+
+      // Strip control tokens from output (e.g. <|im_end|>, <|endoftext|>)
+      fullText = fullText.replace(/<\|[a-z_]+\|>/g, "").trim();
 
       // Emit final snapshot
       if (opts.onStream) {
