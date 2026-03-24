@@ -33,6 +33,16 @@ interface SSEChunk {
   choices?: SSEChoice[];
 }
 
+/** Thrown when the SSE stream contains an error event (e.g. "Model unloaded.") */
+class ServerStreamError extends Error {
+  retryable: boolean;
+  constructor(message: string, retryable = false) {
+    super(message);
+    this.name = "ServerStreamError";
+    this.retryable = retryable;
+  }
+}
+
 export class LocalEngine implements InterruptibleEngine {
   name = "local" as const;
 
@@ -96,8 +106,12 @@ export class LocalEngine implements InterruptibleEngine {
           const body = await response.text().catch(() => "");
           error = `Local engine HTTP ${response.status}: ${body}`;
           logger.error(`[local] ${error}`);
-          // Retryable server errors during model JIT loading
-          if (attempt < MAX_RETRIES && (response.status >= 500 && response.status <= 503)) {
+          // Retryable errors during model JIT loading:
+          // - 500-503: server errors while model is loading
+          // - 400 "Model unloaded": LM Studio returns this when model was evicted
+          const isRetryable = (response.status >= 500 && response.status <= 503)
+            || (response.status === 400 && body.includes("unloaded"));
+          if (attempt < MAX_RETRIES && isRetryable) {
             lastError = error;
             continue;
           }
@@ -122,6 +136,7 @@ export class LocalEngine implements InterruptibleEngine {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let sseEventType = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -132,19 +147,35 @@ export class LocalEngine implements InterruptibleEngine {
           // Keep the last (possibly incomplete) line in the buffer
           buffer = lines.pop() ?? "";
 
+          let sseEventType = "";
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith(":")) continue;
 
+            // Track SSE event type (e.g. "event: error")
+            if (trimmed.startsWith("event:")) {
+              sseEventType = trimmed.slice(6).trim();
+              continue;
+            }
+
             if (trimmed === "data: [DONE]") {
-              // Stream finished
+              sseEventType = "";
               continue;
             }
 
             if (trimmed.startsWith("data: ")) {
-              const json = trimmed.slice(6);
+              const jsonStr = trimmed.slice(6);
               try {
-                const chunk: SSEChunk = JSON.parse(json);
+                const parsed = JSON.parse(jsonStr);
+
+                // Detect server-side error events (e.g. LM Studio "Model unloaded.")
+                if (sseEventType === "error" || parsed.error) {
+                  const errMsg = parsed.error?.message || parsed.message || "Unknown server error";
+                  const retryable = /unloaded|loading|not found|not loaded/i.test(errMsg);
+                  throw new ServerStreamError(errMsg, retryable);
+                }
+
+                const chunk = parsed as SSEChunk;
                 const delta = chunk.choices?.[0]?.delta;
                 // Collect reasoning tokens separately — some models (vibethinker)
                 // put the entire response in reasoning_content with no content field.
@@ -155,10 +186,12 @@ export class LocalEngine implements InterruptibleEngine {
                   fullText += delta.content;
                   opts.onStream?.({ type: "text", content: delta.content });
                 }
-              } catch {
+              } catch (parseErr) {
+                if (parseErr instanceof ServerStreamError) throw parseErr;
                 // Skip malformed JSON lines
-                logger.warn(`[local] Skipping malformed SSE chunk: ${json.slice(0, 120)}`);
+                logger.warn(`[local] Skipping malformed SSE chunk: ${jsonStr.slice(0, 120)}`);
               }
+              sseEventType = "";
             }
           }
         }
@@ -205,9 +238,24 @@ export class LocalEngine implements InterruptibleEngine {
           lastError = error;
           break; // Don't retry user-initiated aborts
         }
+
+        // Server-side SSE error (e.g. "Model unloaded.")
+        if (err instanceof ServerStreamError) {
+          error = err.message;
+          if (attempt < MAX_RETRIES && err.retryable) {
+            logger.warn(`[local] Server error: "${error}" (attempt ${attempt + 1}/${MAX_RETRIES + 1}) — retrying`);
+            lastError = error;
+            continue;
+          }
+          logger.error(`[local] Server error: ${error}`);
+          opts.onStream?.({ type: "error", content: error });
+          lastError = error;
+          break;
+        }
+
         error = err instanceof Error ? err.message : String(err);
 
-        // "terminated" = connection closed during JIT model loading — retryable
+        // "terminated" / connection errors = JIT model loading — retryable
         if (attempt < MAX_RETRIES && (error === "terminated" || error.includes("ECONNRESET") || error.includes("ECONNREFUSED") || error.includes("socket hang up"))) {
           logger.warn(`[local] Stream terminated (attempt ${attempt + 1}/${MAX_RETRIES + 1}), likely JIT model loading — retrying`);
           lastError = error;
