@@ -1021,6 +1021,27 @@ export async function handleApiRequest(
       return json(res, { status: "removed", name: params.name });
     }
 
+    // GET /api/engines/local/models — proxy to local engine's /v1/models
+    if (method === "GET" && pathname === "/api/engines/local/models") {
+      const config = context.getConfig();
+      const localUrl = config.engines?.local?.url;
+      if (!localUrl) {
+        return json(res, { error: "Local engine not configured" }, 400);
+      }
+      try {
+        const upstream = await fetch(`${localUrl.replace(/\/+$/, "")}/v1/models`);
+        if (!upstream.ok) {
+          const body = await upstream.text().catch(() => "");
+          return json(res, { error: `Upstream ${upstream.status}: ${body}` }, upstream.status);
+        }
+        const data = await upstream.json();
+        return json(res, data);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return json(res, { error: `Connection failed: ${msg}` }, 502);
+      }
+    }
+
     // GET /api/config
     if (method === "GET" && pathname === "/api/config") {
       const config = context.getConfig();
