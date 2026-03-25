@@ -360,7 +360,7 @@ export interface JinnConfig {
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     /** OpenAI-compatible local engine (e.g. LM Studio, llama.cpp). Config: { url, model } */
-    local?: { url: string; model: string };
+    local?: { url: string; model: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;

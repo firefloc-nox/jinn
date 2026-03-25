@@ -21,6 +21,7 @@ import { logger } from "../shared/logger.js";
 export interface LocalEngineConfig {
   url: string;
   model: string;
+  maxContextChars?: number;
 }
 
 interface SSEChoice {

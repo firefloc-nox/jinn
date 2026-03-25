@@ -2167,6 +2167,7 @@ async function runWebSession(
       connectors: Array.from(context.connectors.keys()),
       config,
       sessionId: currentSession.id,
+      engineName: currentSession.engine,
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2216,15 +2217,39 @@ async function runWebSession(
     const syncSinceIso = (currentSession.transportMeta as any)?.claudeSyncSince;
     const syncSinceMs = typeof syncSinceIso === "string" ? new Date(syncSinceIso).getTime() : NaN;
     const syncRequested = currentSession.engine === "claude" && typeof syncSinceIso === "string" && Number.isFinite(syncSinceMs);
-    const promptToRun = syncRequested
-      ? (() => {
-        const sinceMessages = getMessages(currentSession.id)
-          .filter((m) => (m.role === "user" || m.role === "assistant") && m.timestamp >= syncSinceMs)
-          .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
-        const transcript = sinceMessages.slice(-20).join("\n\n");
-        return `We temporarily switched to GPT due to a Claude usage limit. Sync your context with this transcript (most recent last), then respond to the last USER message.\n\n${transcript}`;
-      })()
-      : resolvedPrompt;
+
+    // For local models: inject compressed conversation history into prompt.
+    // Local engines have no native session resumption — each call is stateless.
+    // We include the last N turns so the model has multi-turn context.
+    let promptToRun: string;
+    if (syncRequested) {
+      const sinceMessages = getMessages(currentSession.id)
+        .filter((m) => (m.role === "user" || m.role === "assistant") && m.timestamp >= syncSinceMs)
+        .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
+      const transcript = sinceMessages.slice(-20).join("\n\n");
+      promptToRun = `We temporarily switched to GPT due to a Claude usage limit. Sync your context with this transcript (most recent last), then respond to the last USER message.\n\n${transcript}`;
+    } else if (currentSession.engine === "local") {
+      // Check if this is a multi-turn conversation (has prior messages)
+      const history = getMessages(currentSession.id)
+        .filter((m) => m.role === "user" || m.role === "assistant");
+      // Only include history if there are prior turns (not just the current message)
+      if (history.length > 1) {
+        // Budget: keep history under ~4000 chars to leave room for system prompt + response
+        const maxHistoryChars = (config.engines?.local?.maxContextChars ?? 12_000) / 3;
+        const recent = history.slice(-8); // Last 8 messages (4 turns)
+        let historyText = "";
+        for (let i = recent.length - 1; i >= 0; i--) {
+          const entry = `${recent[i].role.toUpperCase()}: ${recent[i].content}`;
+          if (historyText.length + entry.length > maxHistoryChars) break;
+          historyText = entry + "\n\n" + historyText;
+        }
+        promptToRun = `<conversation_history>\n${historyText.trim()}\n</conversation_history>\n\nRespond to the last USER message above.`;
+      } else {
+        promptToRun = resolvedPrompt;
+      }
+    } else {
+      promptToRun = resolvedPrompt;
+    }
 
     const result = await engine.run({
       prompt: promptToRun,

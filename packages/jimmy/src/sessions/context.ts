@@ -55,8 +55,13 @@ export function buildContext(opts: {
   operatorName?: string;
   language?: string;
   channelName?: string;
+  engineName?: string;
 }): string {
-  const maxChars = opts.config?.context?.maxChars ?? DEFAULT_MAX_CONTEXT_CHARS;
+  const isLocal = opts.engineName === "local";
+  const localMaxChars = opts.config?.engines?.local?.maxContextChars;
+  const maxChars = isLocal
+    ? (localMaxChars ?? 12_000)
+    : (opts.config?.context?.maxChars ?? DEFAULT_MAX_CONTEXT_CHARS);
   const sections: Section[] = [];
 
   // Compute gateway URL once — used by multiple sections
@@ -139,15 +144,25 @@ export function buildContext(opts: {
     });
   }
 
-  // ── OPTIONAL: Knowledge / docs (filenames only, never inlined)
-  const knowledgeCtx = buildKnowledgeContext();
-  if (knowledgeCtx) {
+  // ── OPTIONAL: Knowledge / docs ────────────────────────────
+  if (isLocal) {
+    // For local models: reference vector memory instead of listing files
     sections.push({
       tier: Tier.OPTIONAL,
       marker: "## Knowledge base",
-      content: knowledgeCtx,
-      summary: "## Knowledge base\nKnowledge files are in `~/.jinn/knowledge/` and `~/.jinn/docs/`. Read them directly when needed.",
+      content: `## Knowledge base\nUse the vector memory store to retrieve relevant context. Knowledge files are in \`~/.jinn/knowledge/\` and \`~/.jinn/docs/\` — read them on demand, do not expect them in context.`,
+      summary: "## Knowledge\nQuery vector memory or read `~/.jinn/knowledge/` files on demand.",
     });
+  } else {
+    const knowledgeCtx = buildKnowledgeContext();
+    if (knowledgeCtx) {
+      sections.push({
+        tier: Tier.OPTIONAL,
+        marker: "## Knowledge base",
+        content: knowledgeCtx,
+        summary: "## Knowledge base\nKnowledge files are in `~/.jinn/knowledge/` and `~/.jinn/docs/`. Read them directly when needed.",
+      });
+    }
   }
 
   // ── STANDARD: Cross-department services ────────────────────
@@ -184,18 +199,20 @@ export function buildContext(opts: {
   }
 
   // ── OPTIONAL: Local environment ─────────────────────────────
-  const envCtx = buildEnvironmentContext();
-  if (envCtx) {
-    sections.push({
-      tier: Tier.OPTIONAL,
-      marker: "## Local environment",
-      content: envCtx,
-      summary: "## Local environment\nRun `ls ~/` to explore the local filesystem.",
-    });
+  if (!isLocal) {
+    const envCtx = buildEnvironmentContext();
+    if (envCtx) {
+      sections.push({
+        tier: Tier.OPTIONAL,
+        marker: "## Local environment",
+        content: envCtx,
+        summary: "## Local environment\nRun `ls ~/` to explore the local filesystem.",
+      });
+    }
   }
 
   // ── OPTIONAL: Delegation protocol (COO only) ───────────────
-  if (!opts.employee) {
+  if (!opts.employee && !isLocal) {
     sections.push({
       tier: Tier.OPTIONAL,
       marker: "## Employee Delegation",
@@ -205,12 +222,22 @@ export function buildContext(opts: {
   }
 
   // ── STANDARD: Gateway API reference ─────────────────────────
-  sections.push({
-    tier: Tier.STANDARD,
-    marker: `## ${portalName} Gateway API`,
-    content: buildApiReference(gatewayUrl, portalName),
-    summary: `## ${portalName} Gateway API (${gatewayUrl})\nEndpoints: /api/status, /api/sessions, /api/cron, /api/org, /api/skills, /api/config, /api/connectors, /api/logs`,
-  });
+  if (isLocal) {
+    // Compact API ref for local models
+    sections.push({
+      tier: Tier.STANDARD,
+      marker: `## ${portalName} Gateway API`,
+      content: `## ${portalName} Gateway API (${gatewayUrl})\nEndpoints: /api/status, /api/sessions, /api/cron, /api/org, /api/skills, /api/config, /api/connectors, /api/logs`,
+      summary: `## ${portalName} Gateway API (${gatewayUrl})`,
+    });
+  } else {
+    sections.push({
+      tier: Tier.STANDARD,
+      marker: `## ${portalName} Gateway API`,
+      content: buildApiReference(gatewayUrl, portalName),
+      summary: `## ${portalName} Gateway API (${gatewayUrl})\nEndpoints: /api/status, /api/sessions, /api/cron, /api/org, /api/skills, /api/config, /api/connectors, /api/logs`,
+    });
+  }
 
   // ── Assemble with progressive trimming by tier ──────────────
   return trimContext(sections, maxChars);
