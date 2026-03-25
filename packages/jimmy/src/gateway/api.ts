@@ -762,10 +762,11 @@ export async function handleApiRequest(
       // from the current default — the user may have changed it since the stub was created.
       if (!session.engineSessionId && session.engine !== config.engines.default) {
         const newDefault = config.engines.default;
+        const oldEngine = session.engine;
         if (context.sessionManager.getEngine(newDefault)) {
           updateSession(session.id, { engine: newDefault } as any);
           session = { ...session, engine: newDefault };
-          logger.info(`Stub session ${session.id}: engine updated from ${session.engine} to ${newDefault} (config changed)`);
+          logger.info(`Stub session ${session.id}: engine updated from ${oldEngine} to ${newDefault} (config changed)`);
         }
       }
 
