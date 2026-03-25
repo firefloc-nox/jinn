@@ -96,7 +96,7 @@ export class LocalEngine implements InterruptibleEngine {
         }
 
         // Timeout after 5 minutes to avoid hanging on unresponsive servers
-        // AbortSignal.any() requires Node >= 22; fall back to manual wiring on older versions
+        // AbortSignal.any() requires Node >= 20.3.0; fall back to manual wiring on older versions
         let combinedSignal: AbortSignal;
         if (typeof AbortSignal.any === "function") {
           const timeoutSignal = AbortSignal.timeout(300_000);

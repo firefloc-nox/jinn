@@ -757,6 +757,8 @@ export async function handleApiRequest(
       // List knowledge files that match the query (case-insensitive)
       const knowledgeDir = path.join(JINN_HOME, "knowledge");
       const docsDir = path.join(JINN_HOME, "docs");
+      const realKnowledge = fs.existsSync(knowledgeDir) ? fs.realpathSync(knowledgeDir) : knowledgeDir;
+      const realDocs = fs.existsSync(docsDir) ? fs.realpathSync(docsDir) : docsDir;
       const results = [];
       const MAX_FILES_SCANNED = 50;
       let filesScanned = 0;
@@ -776,8 +778,6 @@ export async function handleApiRequest(
           } catch {
             continue; // broken symlink — skip
           }
-          const realKnowledge = fs.existsSync(knowledgeDir) ? fs.realpathSync(knowledgeDir) : knowledgeDir;
-          const realDocs = fs.existsSync(docsDir) ? fs.realpathSync(docsDir) : docsDir;
           if (!realPath.startsWith(realKnowledge + path.sep) && !realPath.startsWith(realDocs + path.sep)) {
             continue; // symlink escapes allowed directories — skip
           }
@@ -2309,7 +2309,8 @@ async function runWebSession(
           // Escape XML-like tags in user content to prevent prompt injection
           const safeContent = recent[i].content
             .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
+            .replace(/>/g, "&gt;")
+            .replace(/\n/g, " ");
           const entry = `${recent[i].role.toUpperCase()}: ${safeContent}`;
           if (historyText.length + entry.length > maxHistoryChars) break;
           historyText = entry + "\n\n" + historyText;
