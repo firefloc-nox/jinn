@@ -14,6 +14,7 @@ import {
   getSession,
   createSession,
   updateSession,
+  UpdateSessionFields,
   deleteSession,
   deleteSessions,
   insertMessage,
@@ -23,6 +24,7 @@ import {
   getQueueItems,
   cancelAllPendingQueueItems,
   listAllPendingQueueItems,
+  getFile,
 } from "../sessions/registry.js";
 import {
   CONFIG_PATH,
@@ -32,6 +34,7 @@ import {
   SKILLS_DIR,
   LOGS_DIR,
   TMP_DIR,
+  FILES_DIR,
 } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
 import { getSttStatus, downloadModel, transcribe as sttTranscribe, resolveLanguages, WHISPER_LANGUAGES } from "../stt/stt.js";
@@ -47,6 +50,29 @@ import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
 import { loadInstances } from "../cli/instances.js";
+import { buildRoutePath, resolveManagerChain } from "./services.js";
+import {
+  loadKanbanConfig,
+  saveKanbanConfig,
+  validateConfig,
+  validateTransition as kanbanValidateTransition,
+  validateMove,
+  dispatch as kanbanDispatch,
+  bulkMove as kanbanBulkMove,
+  bulkAssign as kanbanBulkAssign,
+  countTicketsInColumn,
+  loadAllBoards,
+  persistBoards,
+  ensureYamlLoaded as ensureKanbanYaml,
+  sanitizeTopicDescription,
+  validateTopicDescription,
+} from "./kanban-dispatcher.js";
+import type {
+  KanbanConfig,
+  KanbanTopic,
+  KanbanTicket,
+  BulkTicketAction,
+} from "../shared/kanban-types.js";
 
 export interface ApiContext {
   config: JinnConfig;
@@ -55,6 +81,7 @@ export interface ApiContext {
   getConfig: () => JinnConfig;
   emit: (event: string, payload: unknown) => void;
   connectors: Map<string, import("../shared/types.js").Connector>;
+  reloadConnectorInstances?: () => Promise<{ started: string[]; stopped: string[]; errors: string[] }>;
 }
 
 export function resumePendingWebQueueItems(context: ApiContext): void {
@@ -140,12 +167,12 @@ function dispatchWebSessionRun(
   engine: Engine,
   config: JinnConfig,
   context: ApiContext,
-  opts?: { delayMs?: number; queueItemId?: string },
+  opts?: { delayMs?: number; queueItemId?: string; attachments?: string[] },
 ): void {
   const run = async () => {
     await context.sessionManager.getQueue().enqueue(session.sessionKey || session.sourceRef, async () => {
       context.emit("session:started", { sessionId: session.id });
-      await runWebSession(session, prompt, engine, config, context);
+      await runWebSession(session, prompt, engine, config, context, opts?.attachments);
     }, opts?.queueItemId);
   };
 
@@ -201,6 +228,29 @@ async function readJsonBody(req: HttpRequest, res: ServerResponse): Promise<{ ok
   }
 }
 
+/** Resolve an array of file IDs to local filesystem paths for engine consumption. */
+function resolveAttachmentPaths(fileIds: unknown): string[] {
+  if (!Array.isArray(fileIds)) return [];
+  const paths: string[] = [];
+  for (const id of fileIds) {
+    if (typeof id !== "string" || !id.trim()) continue;
+    const meta = getFile(id);
+    if (!meta) {
+      logger.warn(`Attachment file not found: ${id}`);
+      continue;
+    }
+    const filePath = path.join(FILES_DIR, meta.id, meta.filename);
+    if (fs.existsSync(filePath)) {
+      paths.push(filePath);
+    } else if (meta.path && fs.existsSync(meta.path)) {
+      paths.push(meta.path);
+    } else {
+      logger.warn(`Attachment file missing on disk: ${id} (${meta.filename})`);
+    }
+  }
+  return paths;
+}
+
 function json(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
@@ -218,12 +268,33 @@ function serverError(res: ServerResponse, message: string): void {
   json(res, { error: message }, 500);
 }
 
+const SANITIZED_KEYS = new Set(["token", "botToken", "signingSecret", "appToken"]);
+
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target };
   for (const key of Object.keys(source)) {
     const sv = source[key];
     const tv = target[key];
-    if (sv && typeof sv === "object" && !Array.isArray(sv) && tv && typeof tv === "object" && !Array.isArray(tv)) {
+    // Skip sanitized secret placeholders — keep original value
+    if (SANITIZED_KEYS.has(key) && sv === "***") continue;
+    if (Array.isArray(sv)) {
+      // For arrays (e.g. instances), preserve secrets from matching items
+      if (Array.isArray(tv)) {
+        result[key] = sv.map((item: unknown) => {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            const srcItem = item as Record<string, unknown>;
+            // Find matching target item by id
+            const matchTarget = (tv as unknown[]).find(
+              (t) => t && typeof t === "object" && (t as Record<string, unknown>).id === srcItem.id
+            ) as Record<string, unknown> | undefined;
+            if (matchTarget) return deepMerge(matchTarget, srcItem);
+          }
+          return item;
+        });
+      } else {
+        result[key] = sv;
+      }
+    } else if (sv && typeof sv === "object" && !Array.isArray(sv) && tv && typeof tv === "object" && !Array.isArray(tv)) {
       result[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>);
     } else {
       result[key] = sv;
@@ -300,6 +371,7 @@ export async function handleApiRequest(
           default: config.engines.default,
           claude: { model: config.engines.claude.model, available: true },
           codex: { model: config.engines.codex.model, available: true },
+          ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
@@ -352,7 +424,36 @@ export async function handleApiRequest(
         }
       }
 
+      // Support ?last=N to return only the N most recent messages
+      const lastN = parseInt(url.searchParams.get("last") || "0", 10);
+      if (lastN > 0 && messages.length > lastN) {
+        messages = messages.slice(-lastN);
+      }
+
       return json(res, { ...serializeSession(session, context), messages });
+    }
+
+    // PUT /api/sessions/:id
+    params = matchRoute("/api/sessions/:id", pathname);
+    if (method === "PUT" && params) {
+      const session = getSession(params.id);
+      if (!session) return notFound(res);
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const body = _parsed.body as any;
+      const updates: UpdateSessionFields = {};
+      if (body.title !== undefined) {
+        if (typeof body.title !== "string") return badRequest(res, "title must be a string");
+        const trimmed = body.title.trim();
+        if (!trimmed) return badRequest(res, "title must not be empty");
+        updates.title = trimmed.slice(0, 200);
+      }
+      if (Object.keys(updates).length === 0) return badRequest(res, "no valid fields to update");
+      const updated = updateSession(params.id, updates);
+      if (!updated) return notFound(res);
+      context.emit("session:updated", { sessionId: params.id });
+      return json(res, serializeSession(updated, context));
     }
 
     // DELETE /api/sessions/:id
@@ -388,6 +489,31 @@ export async function handleApiRequest(
       updateSession(params.id, { status: "idle", lastActivity: new Date().toISOString(), lastError: null });
       context.emit("session:stopped", { sessionId: params.id });
       return json(res, { status: "stopped", sessionId: params.id });
+    }
+
+    // POST /api/sessions/:id/reset — clear stuck session state (stale engine IDs, errors)
+    params = matchRoute("/api/sessions/:id/reset", pathname);
+    if (method === "POST" && params) {
+      const session = getSession(params.id);
+      if (!session) return notFound(res);
+      const engine = context.sessionManager.getEngine(session.engine);
+      if (engine && isInterruptibleEngine(engine) && engine.isAlive(params.id)) {
+        engine.kill(params.id, "Interrupted by reset");
+      }
+      context.sessionManager.getQueue().clearQueue(session.sessionKey || session.sourceRef || session.id);
+      const meta = { ...(session.transportMeta || {}) } as Record<string, unknown>;
+      delete meta["engineSessions"];
+      delete meta["engineOverride"];
+      updateSession(params.id, {
+        status: "idle",
+        engineSessionId: null,
+        lastActivity: new Date().toISOString(),
+        lastError: null,
+        transportMeta: meta as any,
+      });
+      logger.info(`Session ${params.id} reset via API (cleared engineSessions, engineOverride, engineSessionId, lastError)`);
+      context.emit("session:updated", { sessionId: params.id });
+      return json(res, { status: "reset", sessionId: params.id });
     }
 
     // DELETE /api/sessions/:id/queue/:itemId — cancel specific item
@@ -528,10 +654,22 @@ export async function handleApiRequest(
       const prompt = body.prompt || body.message;
       if (!prompt) return badRequest(res, "prompt or message is required");
       const config = context.getConfig();
-      const engineName = body.engine || config.engines.default;
+      // Resolve employee engine/model if specified
+      let engineName = body.engine || config.engines.default;
+      let modelName = body.model || undefined;
+      if (body.employee) {
+        const { scanOrg } = await import("./org.js");
+        const emps = scanOrg();
+        const emp = emps.get(body.employee);
+        if (emp) {
+          engineName = body.engine || emp.engine || config.engines.default;
+          modelName = body.model || emp.model || undefined;
+        }
+      }
       const sessionKey = `web:${Date.now()}`;
       const session = createSession({
         engine: engineName,
+        model: modelName,
         source: "web",
         sourceRef: sessionKey,
         connector: "web",
@@ -565,11 +703,13 @@ export async function handleApiRequest(
       });
       session.status = "running";
 
+      const attachmentPaths = resolveAttachmentPaths(body.attachments);
+
       const queueSessionKey = session.sessionKey || session.sourceRef || session.id;
       const queueItemId = enqueueQueueItem(session.id, queueSessionKey, prompt);
       context.emit("queue:updated", { sessionId: session.id, sessionKey: queueSessionKey });
 
-      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId });
+      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId, attachments: attachmentPaths.length > 0 ? attachmentPaths : undefined });
 
       return json(res, serializeSession(session, context), 201);
     }
@@ -644,11 +784,13 @@ export async function handleApiRequest(
       // Clear any pending cancellation so the new message runs normally.
       context.sessionManager.getQueue().clearCancelled(session.sessionKey || session.sourceRef || session.id);
 
+      const attachmentPaths = resolveAttachmentPaths(body.attachments);
+
       const sessionKey = session.sessionKey || session.sourceRef || session.id;
       const queueItemId = enqueueQueueItem(session.id, sessionKey, prompt);
       context.emit("queue:updated", { sessionId: session.id, sessionKey });
 
-      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId });
+      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId, attachments: attachmentPaths.length > 0 ? attachmentPaths : undefined });
 
       return json(res, { status: "queued", sessionId: session.id });
     }
@@ -763,85 +905,462 @@ export async function handleApiRequest(
 
     // GET /api/org
     if (method === "GET" && pathname === "/api/org") {
-      if (!fs.existsSync(ORG_DIR)) return json(res, { departments: [], employees: [] });
-      const entries = fs.readdirSync(ORG_DIR, { withFileTypes: true });
-      const departments = entries
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name);
-      const employees: string[] = [];
-      // Scan root-level YAML files
-      for (const e of entries) {
-        if (e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml"))) {
-          employees.push(e.name.replace(/\.ya?ml$/, ""));
-        }
-      }
-      // Scan employees/ subdirectory
-      const employeesDir = path.join(ORG_DIR, "employees");
-      if (fs.existsSync(employeesDir)) {
-        const empEntries = fs.readdirSync(employeesDir, { withFileTypes: true });
-        for (const e of empEntries) {
-          if (e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml"))) {
-            employees.push(e.name.replace(/\.ya?ml$/, ""));
-          }
-        }
-      }
-      // Scan inside each department directory for YAML files (excluding department.yaml)
-      for (const dept of departments) {
-        const deptDir = path.join(ORG_DIR, dept);
-        const deptEntries = fs.readdirSync(deptDir, { withFileTypes: true });
-        for (const e of deptEntries) {
-          if (e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml")) && e.name !== "department.yaml") {
-            employees.push(e.name.replace(/\.ya?ml$/, ""));
-          }
-        }
-      }
+      const { scanOrgFull } = await import("./org.js");
+      const { employees: empMap, departments: deptMap } = scanOrgFull();
+      const departments = Array.from(deptMap.keys()); // paths like "nexamon-studio/design"
+      const employees = Array.from(empMap.keys());
       return json(res, { departments, employees });
+    }
+
+    // GET /api/org/tree — nested org hierarchy
+    if (method === "GET" && pathname === "/api/org/tree") {
+      const { scanOrgFull } = await import("./org.js");
+      const { employees: empMap, departments: deptMap } = scanOrgFull();
+
+      interface DeptNode {
+        name: string;
+        displayName: string;
+        description?: string;
+        path: string;
+        manager?: { name: string; displayName: string; rank: string } | null;
+        employees: { name: string; displayName: string; rank: string }[];
+        children: DeptNode[];
+      }
+
+      function buildNode(deptPath: string): DeptNode | null {
+        const dept = deptMap.get(deptPath);
+        if (!dept) return null;
+
+        const managerEmp = dept.manager ? empMap.get(dept.manager) : undefined;
+        const node: DeptNode = {
+          name: dept.name,
+          displayName: dept.displayName,
+          description: dept.description,
+          path: dept.path,
+          manager: managerEmp
+            ? { name: managerEmp.name, displayName: managerEmp.displayName, rank: managerEmp.rank }
+            : dept.manager ? { name: dept.manager, displayName: dept.manager, rank: "unknown" } : null,
+          employees: dept.employees
+            .filter((eName) => eName !== dept.manager) // manager listed separately
+            .map((eName) => {
+              const emp = empMap.get(eName);
+              return emp
+                ? { name: emp.name, displayName: emp.displayName, rank: emp.rank }
+                : { name: eName, displayName: eName, rank: "unknown" };
+            }),
+          children: dept.children
+            .map((childPath) => buildNode(childPath))
+            .filter((n): n is DeptNode => n !== null),
+        };
+        return node;
+      }
+
+      // Root departments: those with no parent
+      const roots: DeptNode[] = [];
+      for (const [deptPath, dept] of deptMap) {
+        if (!dept.parent || !deptMap.has(dept.parent)) {
+          const node = buildNode(deptPath);
+          if (node) roots.push(node);
+        }
+      }
+
+      // Also include unassigned employees (orgPath undefined or not matching any dept)
+      const assignedEmployees = new Set<string>();
+      for (const dept of deptMap.values()) {
+        for (const eName of dept.employees) assignedEmployees.add(eName);
+      }
+      const unassigned = Array.from(empMap.values())
+        .filter((emp) => !assignedEmployees.has(emp.name))
+        .map((emp) => ({ name: emp.name, displayName: emp.displayName, rank: emp.rank }));
+
+      return json(res, { tree: roots, unassigned });
+    }
+
+    // GET /api/org/services — list all cross-department services
+    if (method === "GET" && pathname === "/api/org/services") {
+      const { scanOrgFull } = await import("./org.js");
+      const { departments, services } = scanOrgFull();
+      const result = Array.from(services).map(([svcName, deptPath]) => {
+        const dept = departments.get(deptPath);
+        return {
+          name: svcName,
+          department: {
+            path: deptPath,
+            displayName: dept?.displayName || deptPath,
+            manager: dept?.manager || null,
+          },
+        };
+      });
+      return json(res, { services: result });
+    }
+
+    // POST /api/org/cross-request — create a cross-service request
+    if (method === "POST" && pathname === "/api/org/cross-request") {
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as any;
+      const { fromEmployee, service, prompt, parentSessionId } = body;
+      if (!fromEmployee || !service || !prompt) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing required fields: fromEmployee, service, prompt" }));
+        return;
+      }
+
+      const { scanOrgFull } = await import("./org.js");
+      const { employees: empMap, departments, services } = scanOrgFull();
+
+      const requester = empMap.get(fromEmployee);
+      if (!requester) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Employee "${fromEmployee}" not found` }));
+        return;
+      }
+
+      const targetDeptPath = services.get(service);
+      if (!targetDeptPath) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          error: `Service "${service}" not found`,
+        }));
+        return;
+      }
+
+      const targetDept = departments.get(targetDeptPath);
+      if (!targetDept?.manager) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Target department "${targetDeptPath}" has no manager` }));
+        return;
+      }
+
+      // Build the route path and manager chain
+      const fromDept = requester.orgPath || "";
+      const routePath = buildRoutePath(fromDept, targetDeptPath, departments);
+      const managerChain = resolveManagerChain(routePath, departments, empMap);
+
+      // Create a session targeting the target department's manager
+      const crossBrief = `## Cross-service request
+
+**From**: ${requester.displayName} (${requester.department})
+**Service requested**: ${service}
+**Routing**: ${routePath.map(p => departments.get(p)?.displayName || p).join(" → ")}
+
+### Request
+${prompt}
+
+---
+Handle this request as a priority task from your chain of command. Assign it to the most appropriate team member and deliver the result.`;
+
+      // Use the target manager's configured engine, falling back to default
+      const targetManager = empMap.get(targetDept.manager);
+      const targetEngine = targetManager?.engine || context.config.engines.default || "claude";
+
+      const session = createSession({
+        prompt: crossBrief,
+        engine: targetEngine,
+        source: "cross-request",
+        sourceRef: `cross:${fromEmployee}:${service}`,
+        employee: targetDept.manager,
+        parentSessionId: parentSessionId || undefined,
+        title: `Cross-request: ${fromEmployee} → ${service}`,
+      });
+      const sessionId = session.id;
+
+      return json(res, {
+        sessionId,
+        route: routePath,
+        managers: managerChain.map(m => ({ name: m.name, displayName: m.displayName, department: m.department })),
+        targetDepartment: targetDeptPath,
+        targetManager: targetDept.manager,
+        service,
+      });
     }
 
     // GET /api/org/employees/:name
     params = matchRoute("/api/org/employees/:name", pathname);
     if (method === "GET" && params) {
-      const candidates = [
-        path.join(ORG_DIR, "employees", `${params.name}.yaml`),
-        path.join(ORG_DIR, "employees", `${params.name}.yml`),
-        path.join(ORG_DIR, `${params.name}.yaml`),
-        path.join(ORG_DIR, `${params.name}.yml`),
-      ];
-      // Also search inside each department directory
-      if (fs.existsSync(ORG_DIR)) {
-        const dirs = fs.readdirSync(ORG_DIR, { withFileTypes: true }).filter((e) => e.isDirectory());
-        for (const dir of dirs) {
-          candidates.push(path.join(ORG_DIR, dir.name, `${params.name}.yaml`));
-          candidates.push(path.join(ORG_DIR, dir.name, `${params.name}.yml`));
+      // Recursive search for employee YAML at any depth
+      const findEmployeeFile = (dir: string, name: string): string | null => {
+        if (!fs.existsSync(dir)) return null;
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isFile() && (entry.name === `${name}.yaml` || entry.name === `${name}.yml`) && entry.name !== "department.yaml") {
+            return fullPath;
+          }
+          if (entry.isDirectory()) {
+            const found = findEmployeeFile(fullPath, name);
+            if (found) return found;
+          }
         }
-      }
-      const filePath = candidates.find((c) => fs.existsSync(c));
+        return null;
+      };
+      const filePath = findEmployeeFile(ORG_DIR, params.name);
       if (!filePath) return notFound(res);
       const content = yaml.load(fs.readFileSync(filePath, "utf-8"));
       return json(res, content);
     }
 
-    // GET /api/org/departments/:name/board
-    params = matchRoute("/api/org/departments/:name/board", pathname);
-    if (method === "GET" && params) {
-      const boardPath = path.join(ORG_DIR, params.name, "board.json");
+    // PATCH /api/org/employees/:name — update employee fields (currently only alwaysNotify)
+    params = matchRoute("/api/org/employees/:name", pathname);
+    if (method === "PATCH" && params) {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+      const { updateEmployeeYaml } = await import("./org.js");
+      const updated = updateEmployeeYaml(params.name, {
+        alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
+      });
+      if (!updated) return notFound(res);
+      context.emit("org:updated", { employee: params.name });
+      return json(res, { status: "ok" });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Kanban config, topics, bulk ops, validation, dispatch
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // GET /api/kanban/config — load the kanban board configuration
+    if (method === "GET" && pathname === "/api/kanban/config") {
+      const config = loadKanbanConfig();
+      return json(res, config);
+    }
+
+    // PUT /api/kanban/config — save kanban board configuration
+    if (method === "PUT" && pathname === "/api/kanban/config") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const newConfig = _parsed.body as KanbanConfig;
+
+      // Validate
+      const errors = validateConfig(newConfig);
+      if (errors.length > 0) {
+        return json(res, { ok: false, errors }, 400);
+      }
+
+      // Check for orphaned tickets when columns are removed
+      const oldConfig = loadKanbanConfig();
+      const removedCols = oldConfig.columns.filter(
+        (old) => !newConfig.columns.some((n) => n.id === old.id),
+      );
+
+      const warnings: string[] = [];
+      for (const col of removedCols) {
+        const count = countTicketsInColumn(col.id);
+        if (count > 0) {
+          warnings.push(`Column '${col.id}' has ${count} ticket(s) — move them before removing`);
+        }
+      }
+
+      await saveKanbanConfig(newConfig);
+      context.emit("kanban:config-updated", {});
+      return json(res, { ok: true, warnings });
+    }
+
+    // GET /api/kanban/topics — list all topics
+    if (method === "GET" && pathname === "/api/kanban/topics") {
+      const config = loadKanbanConfig();
+      return json(res, config.topics ?? []);
+    }
+
+    // POST /api/kanban/topics — create a new topic
+    if (method === "POST" && pathname === "/api/kanban/topics") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as Omit<KanbanTopic, "id">;
+
+      if (!body.name || typeof body.name !== "string") {
+        return badRequest(res, "name is required");
+      }
+
+      const config = loadKanbanConfig();
+      if (config.topics.some((t) => t.name === body.name)) {
+        return badRequest(res, `Topic name '${body.name}' already exists`);
+      }
+
+      // Sanitize and validate description
+      const rawDescription = body.description ?? "";
+      const descError = validateTopicDescription(rawDescription);
+      if (descError) {
+        return badRequest(res, descError);
+      }
+
+      const topic: KanbanTopic = {
+        id: crypto.randomUUID(),
+        name: body.name,
+        description: sanitizeTopicDescription(rawDescription),
+        color: body.color ?? "#6b7280",
+        tags: Array.isArray(body.tags) ? body.tags : [],
+        defaultAssignee: body.defaultAssignee ?? null,
+        defaultPriority: body.defaultPriority,
+        autoAssignRules: body.autoAssignRules,
+      };
+
+      config.topics.push(topic);
+      await saveKanbanConfig(config);
+      context.emit("kanban:config-updated", {});
+      return json(res, topic, 201);
+    }
+
+    // PUT /api/kanban/topics/:id — update a topic
+    params = matchRoute("/api/kanban/topics/:id", pathname);
+    if (method === "PUT" && params) {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as Partial<KanbanTopic>;
+
+      const config = loadKanbanConfig();
+      const idx = config.topics.findIndex((t) => t.id === params!.id);
+      if (idx === -1) return notFound(res);
+
+      // Check name uniqueness if name is being changed
+      if (body.name && body.name !== config.topics[idx].name) {
+        if (config.topics.some((t) => t.name === body.name)) {
+          return badRequest(res, `Topic name '${body.name}' already exists`);
+        }
+      }
+
+      // Sanitize and validate description if provided
+      if (body.description !== undefined) {
+        const descError = validateTopicDescription(body.description);
+        if (descError) {
+          return badRequest(res, descError);
+        }
+        body.description = sanitizeTopicDescription(body.description);
+      }
+
+      config.topics[idx] = { ...config.topics[idx], ...body, id: params.id };
+      await saveKanbanConfig(config);
+      context.emit("kanban:config-updated", {});
+      return json(res, config.topics[idx]);
+    }
+
+    // DELETE /api/kanban/topics/:id — delete a topic
+    params = matchRoute("/api/kanban/topics/:id", pathname);
+    if (method === "DELETE" && params) {
+      const config = loadKanbanConfig();
+      const idx = config.topics.findIndex((t) => t.id === params!.id);
+      if (idx === -1) return notFound(res);
+
+      config.topics.splice(idx, 1);
+      await saveKanbanConfig(config);
+      context.emit("kanban:config-updated", {});
+      return json(res, { ok: true });
+    }
+
+    // PATCH /api/kanban/tickets/bulk — atomic bulk move / assign
+    if (method === "PATCH" && pathname === "/api/kanban/tickets/bulk") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const action = _parsed.body as BulkTicketAction;
+
+      if (!Array.isArray(action.ids) || action.ids.length === 0) {
+        return badRequest(res, "ids[] is required and must be non-empty");
+      }
+
+      const config = loadKanbanConfig();
+      const { boards, allTickets } = loadAllBoards();
+
+      // Bulk move
+      if (action.targetColumn) {
+        if (!config.columns.some((c) => c.id === action.targetColumn)) {
+          return badRequest(res, `Column '${action.targetColumn}' does not exist in config`);
+        }
+
+        const result = kanbanBulkMove(action, allTickets, config);
+        if (result.blocked.length > 0) {
+          return json(res, result);
+        }
+
+        // Persist changed boards
+        try {
+          persistBoards(boards);
+        } catch (err) {
+          logger.error(`CRITICAL: persistBoards failed in PATCH bulk (move): ${err instanceof Error ? err.message : err}`);
+          return json(res, { error: "Failed to persist boards", code: "PERSIST_FAILED" }, 500);
+        }
+        context.emit("board:updated", { bulk: true });
+        return json(res, result);
+      }
+
+      // Bulk assign / topic attach
+      if (action.assigneeId !== undefined || action.topicId !== undefined) {
+        const updated = kanbanBulkAssign(action, allTickets);
+        try {
+          persistBoards(boards);
+        } catch (err) {
+          logger.error(`CRITICAL: persistBoards failed in PATCH bulk (assign): ${err instanceof Error ? err.message : err}`);
+          return json(res, { error: "Failed to persist boards", code: "PERSIST_FAILED" }, 500);
+        }
+        context.emit("board:updated", { bulk: true });
+        return json(res, { moved: updated, blocked: [] });
+      }
+
+      return badRequest(res, "Provide targetColumn, assigneeId, or topicId");
+    }
+
+    // POST /api/kanban/validate-transition — check if a transition is allowed
+    if (method === "POST" && pathname === "/api/kanban/validate-transition") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const { from, to } = _parsed.body as { from: string; to: string };
+
+      if (!from || !to) return badRequest(res, "from and to are required");
+
+      const config = loadKanbanConfig();
+      return json(res, kanbanValidateTransition(from, to, config));
+    }
+
+    // POST /api/kanban/dispatch — auto-assign a ticket via dispatcher rules
+    if (method === "POST" && pathname === "/api/kanban/dispatch") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const { ticket, departmentId } = _parsed.body as {
+        ticket: KanbanTicket;
+        departmentId?: string;
+      };
+
+      if (!ticket) return badRequest(res, "ticket object is required");
+
+      const config = loadKanbanConfig();
+      const { scanOrg } = await import("./org.js");
+      const employeeMap = scanOrg();
+      const employees = Array.from(employeeMap.values());
+
+      const result = kanbanDispatch(
+        { ...ticket, departmentId: departmentId ?? ticket.departmentId },
+        config,
+        employees,
+      );
+      return json(res, result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Board (legacy — kept for backward compatibility)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // GET /api/org/departments/*/board — supports nested paths like nexamon-studio/design
+    if (method === "GET" && pathname.startsWith("/api/org/departments/") && pathname.endsWith("/board")) {
+      const deptPath = pathname.slice("/api/org/departments/".length, -"/board".length);
+      const resolved = path.resolve(path.join(ORG_DIR, deptPath, "board.json"));
+      if (!resolved.startsWith(path.resolve(ORG_DIR) + path.sep)) return badRequest(res, "Invalid path");
+      const boardPath = resolved;
       if (!fs.existsSync(boardPath)) return notFound(res);
       const board = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
       return json(res, board);
     }
 
-    // PUT /api/org/departments/:name/board
-    if (method === "PUT" && matchRoute("/api/org/departments/:name/board", pathname)) {
-      const p = matchRoute("/api/org/departments/:name/board", pathname)!;
-      const boardPath = path.join(ORG_DIR, p.name, "board.json");
-      const deptDir = path.join(ORG_DIR, p.name);
+    // PUT /api/org/departments/*/board — supports nested paths
+    if (method === "PUT" && pathname.startsWith("/api/org/departments/") && pathname.endsWith("/board")) {
+      const deptPath = pathname.slice("/api/org/departments/".length, -"/board".length);
+      const deptDir = path.resolve(path.join(ORG_DIR, deptPath));
+      if (!deptDir.startsWith(path.resolve(ORG_DIR) + path.sep)) return badRequest(res, "Invalid path");
       if (!fs.existsSync(deptDir)) return notFound(res);
       const _parsed = await readJsonBody(req, res);
       if (!_parsed.ok) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const body = _parsed.body as any;
+      const body = _parsed.body as Record<string, unknown>;
+      const boardPath = path.join(deptDir, "board.json");
       fs.writeFileSync(boardPath, JSON.stringify(body, null, 2));
-      context.emit("board:updated", { department: p.name });
+      context.emit("board:updated", { department: deptPath });
       return json(res, { status: "ok" });
     }
 
@@ -979,20 +1498,32 @@ export async function handleApiRequest(
     if (method === "GET" && pathname === "/api/config") {
       const config = context.getConfig();
       // Sanitize: remove any secrets/tokens from connectors
+      const rawConnectors = config.connectors || {};
+      const sanitizedConnectors: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rawConnectors)) {
+        if (k === "instances" && Array.isArray(v)) {
+          sanitizedConnectors.instances = v.map((inst: any) => ({
+            ...inst,
+            token: inst?.token ? "***" : undefined,
+            signingSecret: inst?.signingSecret ? "***" : undefined,
+            botToken: inst?.botToken ? "***" : undefined,
+            appToken: inst?.appToken ? "***" : undefined,
+          }));
+        } else if (v && typeof v === "object") {
+          sanitizedConnectors[k] = {
+            ...v,
+            token: (v as any)?.token ? "***" : undefined,
+            signingSecret: (v as any)?.signingSecret ? "***" : undefined,
+            botToken: (v as any)?.botToken ? "***" : undefined,
+            appToken: (v as any)?.appToken ? "***" : undefined,
+          };
+        } else {
+          sanitizedConnectors[k] = v;
+        }
+      }
       const sanitized = {
         ...config,
-        connectors: Object.fromEntries(
-          Object.entries(config.connectors || {}).map(([k, v]) => [
-            k,
-            {
-              ...v,
-              token: v?.token ? "***" : undefined,
-              signingSecret: v?.signingSecret ? "***" : undefined,
-              botToken: v?.botToken ? "***" : undefined,
-              appToken: v?.appToken ? "***" : undefined,
-            },
-          ]),
-        ),
+        connectors: sanitizedConnectors,
       };
       return json(res, sanitized);
     }
@@ -1070,6 +1601,20 @@ export async function handleApiRequest(
       const allLines = buf.toString("utf-8").split("\n").filter(Boolean);
       const lines = allLines.slice(-n);
       return json(res, { lines });
+    }
+
+    // POST /api/connectors/reload — stop all instance connectors and restart from config
+    if (method === "POST" && pathname === "/api/connectors/reload") {
+      if (!context.reloadConnectorInstances) {
+        return json(res, { error: "Connector reload not available" }, 501);
+      }
+      try {
+        const result = await context.reloadConnectorInstances();
+        context.emit("connectors:reloaded", result);
+        return json(res, result);
+      } catch (err) {
+        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      }
     }
 
     // POST /api/connectors/:id/incoming — receive proxied Discord messages from primary instance
@@ -1206,8 +1751,7 @@ export async function handleApiRequest(
       const connectors = Array.from(context.connectors.entries()).map(([instanceId, connector]) => ({
         name: connector.name,
         instanceId,
-        // Include employee binding if the connector exposes it
-        employee: (connector as any).config?.employee ?? undefined,
+        employee: connector.getEmployee?.() ?? undefined,
         ...connector.getHealth(),
       }));
       return json(res, connectors);
@@ -1242,8 +1786,10 @@ export async function handleApiRequest(
           (f) => String(f).endsWith(".yaml") && !String(f).endsWith("department.yaml")
         );
       const config = context.getConfig();
+      const onboarded = config.portal?.onboarded === true;
       return json(res, {
-        needed: sessions.length === 0 && !hasEmployees,
+        needed: !onboarded && sessions.length === 0 && !hasEmployees,
+        onboarded,
         sessionsCount: sessions.length,
         hasEmployees,
         portalName: config.portal?.portalName ?? null,
@@ -1265,6 +1811,7 @@ export async function handleApiRequest(
         ...config,
         portal: {
           ...config.portal,
+          onboarded: true,
           ...(portalName !== undefined && { portalName: portalName || undefined }),
           ...(operatorName !== undefined && { operatorName: operatorName || undefined }),
           ...(language !== undefined && { language: language || undefined }),
@@ -1743,6 +2290,7 @@ async function runWebSession(
   engine: Engine,
   config: JinnConfig,
   context: ApiContext,
+  attachments?: string[],
 ): Promise<void> {
   const currentSession = getSession(session.id);
   if (!currentSession) {
@@ -1760,15 +2308,16 @@ async function runWebSession(
     });
   }
 
+  // If this session has an assigned employee, load their persona
+  let employee: import("../shared/types.js").Employee | undefined;
+  if (currentSession.employee) {
+    const { findEmployee } = await import("./org.js");
+    const { scanOrg } = await import("./org.js");
+    const registry = scanOrg();
+    employee = findEmployee(currentSession.employee, registry);
+  }
+
   try {
-    // If this session has an assigned employee, load their persona
-    let employee: import("../shared/types.js").Employee | undefined;
-    if (currentSession.employee) {
-      const { findEmployee } = await import("./org.js");
-      const { scanOrg } = await import("./org.js");
-      const registry = scanOrg();
-      employee = findEmployee(currentSession.employee, registry);
-    }
 
     const systemPrompt = buildContext({
       source: "web",
@@ -1782,7 +2331,9 @@ async function runWebSession(
 
     const engineConfig = currentSession.engine === "codex"
       ? config.engines.codex
-      : config.engines.claude;
+      : currentSession.engine === "gemini"
+        ? config.engines.gemini ?? config.engines.claude
+        : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     let lastHeartbeatAt = 0;
@@ -1815,6 +2366,7 @@ async function runWebSession(
       model: currentSession.model ?? engineConfig.model,
       effortLevel,
       cliFlags: employee?.cliFlags,
+      attachments: attachments?.length ? attachments : undefined,
       sessionId: currentSession.id,
       onStream: (delta) => {
         const now = Date.now();
@@ -1945,7 +2497,7 @@ async function runWebSession(
             lastError: fallbackResult.error ?? null,
           });
           if (completedFallback) {
-            notifyParentSession(completedFallback, { result: fallbackResult.result, error: fallbackResult.error ?? null, cost: fallbackResult.cost, durationMs: fallbackResult.durationMs });
+            notifyParentSession(completedFallback, { result: fallbackResult.result, error: fallbackResult.error ?? null, cost: fallbackResult.cost, durationMs: fallbackResult.durationMs }, { alwaysNotify: employee?.alwaysNotify });
           }
 
           context.emit("session:completed", {
@@ -2092,7 +2644,7 @@ async function runWebSession(
             notifyDiscordChannel(
               `✅ Claude usage limit cleared. Session ${currentSession.id}${currentSession.employee ? ` (${currentSession.employee})` : ""} resumed.`,
             );
-            notifyParentSession(completedAfterRetry, { result: retryResult.result, error: retryResult.error ?? null, cost: retryResult.cost, durationMs: retryResult.durationMs });
+            notifyParentSession(completedAfterRetry, { result: retryResult.result, error: retryResult.error ?? null, cost: retryResult.cost, durationMs: retryResult.durationMs }, { alwaysNotify: employee?.alwaysNotify });
           }
 
           context.emit("session:completed", {
@@ -2119,7 +2671,7 @@ async function runWebSession(
           lastError: "Claude usage limit did not clear in time",
         });
         if (erroredSession) {
-          notifyParentSession(erroredSession, { error: "Claude usage limit did not clear in time" });
+          notifyParentSession(erroredSession, { error: "Claude usage limit did not clear in time" }, { alwaysNotify: employee?.alwaysNotify });
         }
         context.emit("session:completed", {
           sessionId: currentSession.id,
@@ -2153,7 +2705,7 @@ async function runWebSession(
       }
     }
     if (completedSession) {
-      notifyParentSession(completedSession, { result: result.result, error: result.error ?? null, cost: result.cost, durationMs: result.durationMs });
+      notifyParentSession(completedSession, { result: result.result, error: result.error ?? null, cost: result.cost, durationMs: result.durationMs }, { alwaysNotify: employee?.alwaysNotify });
     }
 
     context.emit("session:completed", {
@@ -2183,7 +2735,7 @@ async function runWebSession(
       lastError: errMsg,
     });
     if (erroredSession) {
-      notifyParentSession(erroredSession, { error: errMsg });
+      notifyParentSession(erroredSession, { error: errMsg }, { alwaysNotify: employee?.alwaysNotify });
     }
     context.emit("session:completed", {
       sessionId: currentSession.id,

@@ -2,8 +2,9 @@
 
 import { useEffect, useRef } from 'react'
 import type { Employee } from '@/lib/api'
-import type { KanbanTicket, TicketStatus, TicketPriority, KanbanColumn as KanbanColumnDef } from '@/lib/kanban/types'
-import { PRIORITY_COLORS, DEFAULT_COLUMNS } from '@/lib/kanban/types'
+import type { KanbanTicket, TicketStatus, TicketPriority, KanbanColumn, KanbanConfig } from '@/lib/kanban/types'
+import { PRIORITY_COLORS, COLUMNS } from '@/lib/kanban/types'
+import { validateTransition } from '@/lib/kanban/store'
 import { EmployeePicker } from './employee-picker'
 
 /* Priority badge */
@@ -23,9 +24,8 @@ function PriorityBadge({ priority }: { priority: TicketPriority }) {
 }
 
 /* Status badge */
-function StatusBadge({ status, columns }: { status: TicketStatus; columns?: KanbanColumnDef[] }) {
-  const cols = columns ?? DEFAULT_COLUMNS
-  const label = cols.find(c => c.id === status)?.title ?? status
+function StatusBadge({ status, columns }: { status: TicketStatus; columns: KanbanColumn[] }) {
+  const label = columns.find((c) => c.id === status)?.title ?? status
   return (
     <span className="text-[length:var(--text-caption2)] font-semibold text-[var(--text-secondary)] bg-[var(--fill-tertiary)] px-[var(--space-2)] py-[2px] rounded-[var(--radius-sm)] uppercase tracking-[0.3px]">
       {label}
@@ -37,7 +37,8 @@ function StatusBadge({ status, columns }: { status: TicketStatus; columns?: Kanb
 interface TicketDetailPanelProps {
   ticket: KanbanTicket
   employees: Employee[]
-  columns?: KanbanColumnDef[]
+  columns?: KanbanColumn[]     // dynamic columns; falls back to COLUMNS
+  config?: KanbanConfig        // when provided, blocked transitions are shown disabled
   onClose: () => void
   onStatusChange: (status: TicketStatus) => void
   onAssigneeChange: (employeeName: string | null) => void
@@ -48,13 +49,14 @@ export function TicketDetailPanel({
   ticket,
   employees,
   columns,
+  config,
   onClose,
   onStatusChange,
   onAssigneeChange,
   onDelete,
 }: TicketDetailPanelProps) {
-  const cols = columns ?? DEFAULT_COLUMNS
   const closeRef = useRef<HTMLButtonElement>(null)
+  const activeColumns = columns ?? COLUMNS
 
   // Escape key to close
   useEffect(() => {
@@ -70,20 +72,12 @@ export function TicketDetailPanel({
     closeRef.current?.focus()
   }, [])
 
-  function handleDelete() {
-    onDelete()
-  }
-
-  const assignee = employees.find(e => e.name === ticket.assigneeId) ?? null
+  const assignee = employees.find((e) => e.name === ticket.assigneeId) ?? null
   const accentColor = 'var(--accent)'
 
   return (
-    <div
-      className="absolute top-0 right-0 bottom-0 z-30"
-    >
-      <div
-        className="w-[420px] max-w-[100vw] h-full bg-[var(--material-regular)] shadow-[-4px_0_24px_rgba(0,0,0,0.25)] flex flex-col"
-      >
+    <div className="absolute top-0 right-0 bottom-0 z-30">
+      <div className="w-[420px] max-w-[100vw] h-full bg-[var(--material-regular)] shadow-[-4px_0_24px_rgba(0,0,0,0.25)] flex flex-col">
         {/* Color strip */}
         <div className="h-[3px] bg-[var(--accent)] shrink-0" />
 
@@ -108,11 +102,11 @@ export function TicketDetailPanel({
             </h2>
 
             <div className="flex items-center gap-[var(--space-3)] mt-[var(--space-2)]">
-              <StatusBadge status={ticket.status} columns={cols} />
+              <StatusBadge status={ticket.status} columns={activeColumns} />
               <PriorityBadge priority={ticket.priority} />
             </div>
 
-            {/* Assignee */}
+            {/* Assignee display */}
             {assignee ? (
               <div className="flex items-center gap-[var(--space-2)] mt-[var(--space-3)] text-[length:var(--text-footnote)] text-[var(--text-secondary)]">
                 <span>{assignee.displayName}</span>
@@ -133,19 +127,33 @@ export function TicketDetailPanel({
               Move to
             </div>
             <div className="flex gap-[var(--space-1)] flex-wrap">
-              {cols.map(col => {
+              {activeColumns.map((col) => {
                 const isCurrent = col.id === ticket.status
+                const isBlocked = !isCurrent && config
+                  ? !validateTransition(ticket.status, col.id, config)
+                  : false
+
                 return (
                   <button
                     key={col.id}
-                    onClick={() => { if (!isCurrent) onStatusChange(col.id) }}
-                    disabled={isCurrent}
+                    onClick={() => { if (!isCurrent && !isBlocked) onStatusChange(col.id) }}
+                    disabled={isCurrent || isBlocked}
+                    title={isBlocked ? `Blocked: ${ticket.status} → ${col.id}` : undefined}
                     className="text-[length:var(--text-caption2)] font-semibold py-[3px] px-[var(--space-2)] rounded-[var(--radius-sm)] border-none transition-all duration-[120ms] ease-linear"
                     style={{
-                      cursor: isCurrent ? 'default' : 'pointer',
-                      background: isCurrent ? accentColor : 'var(--fill-tertiary)',
-                      color: isCurrent ? '#fff' : 'var(--text-secondary)',
-                      opacity: isCurrent ? 1 : 0.8,
+                      cursor: isCurrent || isBlocked ? 'default' : 'pointer',
+                      background: isCurrent
+                        ? accentColor
+                        : isBlocked
+                        ? 'var(--fill-tertiary)'
+                        : 'var(--fill-tertiary)',
+                      color: isCurrent
+                        ? '#fff'
+                        : isBlocked
+                        ? 'var(--text-quaternary)'
+                        : 'var(--text-secondary)',
+                      opacity: isBlocked ? 0.45 : isCurrent ? 1 : 0.8,
+                      textDecoration: isBlocked ? 'line-through' : undefined,
                     }}
                   >
                     {col.title}
@@ -184,7 +192,7 @@ export function TicketDetailPanel({
         {/* Delete button */}
         <div className="shrink-0 py-[var(--space-2)] px-[var(--space-5)] pb-[var(--space-4)] border-t border-[var(--separator)]">
           <button
-            onClick={handleDelete}
+            onClick={onDelete}
             className="w-full py-[var(--space-2)] px-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--system-red)] bg-transparent text-[var(--system-red)] text-[length:var(--text-footnote)] font-semibold cursor-pointer transition-all duration-[120ms] ease-linear"
           >
             Delete Ticket

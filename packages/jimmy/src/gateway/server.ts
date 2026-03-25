@@ -23,6 +23,7 @@ import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { loadJobs } from "../cron/jobs.js";
 import { startScheduler, reloadScheduler, stopScheduler } from "../cron/scheduler.js";
 import { scanOrg } from "./org.js";
+import { ensureYamlLoaded as ensureKanbanYaml, invalidateConfigCache as invalidateKanbanCache } from "./kanban-dispatcher.js";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -468,6 +469,13 @@ export async function startGateway(
     logger.warn(`STT init skipped: ${err instanceof Error ? err.message : err}`);
   }
 
+  // Initialize kanban YAML parser (must be done before first config load)
+  try {
+    await ensureKanbanYaml();
+  } catch (err) {
+    logger.warn(`Kanban YAML init skipped: ${err instanceof Error ? err.message : err}`);
+  }
+
   // Start file watchers
   startWatchers({
     onConfigReload: () => {
@@ -496,6 +504,11 @@ export async function startGateway(
     onSkillsChange: () => {
       logger.info("Skills changed, notifying clients");
       emit("skills:changed", {});
+    },
+    onKanbanConfigReload: () => {
+      invalidateKanbanCache();
+      logger.info("Kanban config reloaded");
+      emit("kanban:config-updated", {});
     },
   });
 

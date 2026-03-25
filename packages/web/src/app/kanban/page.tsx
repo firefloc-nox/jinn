@@ -1,20 +1,13 @@
 "use client"
 
-import { useEffect, useState, useCallback } from 'react'
-import { Plus } from 'lucide-react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { Plus, Undo2, Redo2, Users } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { Employee, OrgData } from '@/lib/api'
-import type { KanbanTicket, TicketStatus, TicketPriority, KanbanColumn as KanbanColumnDef } from '@/lib/kanban/types'
-import { DEFAULT_COLUMNS, STATUS_ALIASES } from '@/lib/kanban/types'
-import {
-  loadTickets,
-  saveTickets,
-  createTicket,
-  updateTicket,
-  moveTicket,
-  deleteTicket,
-  type KanbanStore,
-} from '@/lib/kanban/store'
+import type { KanbanTicket, TicketStatus, TicketPriority } from '@/lib/kanban/types'
+import { type KanbanStore } from '@/lib/kanban/store'
+import { useKanban } from '@/hooks/use-kanban'
+import { useNotifications } from '@/hooks/use-notifications'
 import { PageLayout, ToolbarActions } from '@/components/page-layout'
 import {
   Dialog,
@@ -27,8 +20,12 @@ import {
 import { KanbanBoard } from '@/components/kanban/kanban-board'
 import { CreateTicketModal } from '@/components/kanban/create-ticket-modal'
 import { TicketDetailPanel } from '@/components/kanban/ticket-detail-panel'
+import { DispatcherPanel } from '@/components/kanban/dispatcher-panel'
 
-/** Delete confirmation dialog */
+// ---------------------------------------------------------------------------
+// Delete confirmation dialog
+// ---------------------------------------------------------------------------
+
 function DeleteConfirmDialog({
   ticket,
   onConfirm,
@@ -45,14 +42,10 @@ function DeleteConfirmDialog({
         className="bg-[var(--bg)] border border-[var(--separator)] rounded-[var(--radius-lg)] shadow-[var(--shadow-card)] max-w-[400px]"
       >
         <DialogHeader>
-          <DialogTitle
-            className="text-[length:var(--text-title3)] font-[var(--weight-bold)] text-[var(--text-primary)]"
-          >
+          <DialogTitle className="text-[length:var(--text-title3)] font-[var(--weight-bold)] text-[var(--text-primary)]">
             Delete Ticket
           </DialogTitle>
-          <DialogDescription
-            className="text-[length:var(--text-footnote)] text-[var(--text-secondary)] leading-[1.5]"
-          >
+          <DialogDescription className="text-[length:var(--text-footnote)] text-[var(--text-secondary)] leading-[1.5]">
             Are you sure you want to delete &ldquo;{ticket.title}&rdquo;? This cannot be undone.
           </DialogDescription>
         </DialogHeader>
@@ -76,72 +69,51 @@ function DeleteConfirmDialog({
   )
 }
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function KanbanPage() {
-  const [tickets, setTickets] = useState<KanbanStore>({})
   const [employees, setEmployees] = useState<Employee[]>([])
   const [departments, setDepartments] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // UI state
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedTicket, setSelectedTicket] = useState<KanbanTicket | null>(null)
-  const [filterEmployeeId, setFilterEmployeeId] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<KanbanTicket | null>(null)
-  const [columns, setColumns] = useState<KanbanColumnDef[]>(DEFAULT_COLUMNS)
+  const [filterEmployeeId, setFilterEmployeeId] = useState<string | null>(null)
+  const [dispatcherOpen, setDispatcherOpen] = useState(false)
 
-  /** Sync tickets to the gateway API, grouped by department */
-  const syncToApi = useCallback(async (store: KanbanStore) => {
-    // Group tickets by department
-    const byDept: Record<string, Array<{
-      id: string
-      title: string
-      description?: string
-      status: string
-      priority: string
-      assignee?: string
-      createdAt: string
-      updatedAt: string
-    }>> = {}
+  // Core kanban state (config + history + operations)
+  const kanban = useKanban({ employees, departments })
+  const { tickets, config, canUndo, canRedo, undo, redo } = kanban
+  const { pushDirect } = useNotifications()
 
-    for (const ticket of Object.values(store)) {
-      const dept = ticket.department
-      if (!dept) continue
-      if (!byDept[dept]) byDept[dept] = []
-      byDept[dept].push({
-        id: ticket.id,
-        title: ticket.title,
-        description: ticket.description || undefined,
-        status: ticket.status,
-        priority: ticket.priority,
-        assignee: ticket.assigneeId || undefined,
-        createdAt: new Date(ticket.createdAt).toISOString(),
-        updatedAt: new Date(ticket.updatedAt).toISOString(),
-      })
+  // ---------------------------------------------------------------------------
+  // Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMac = navigator.platform.toUpperCase().includes('MAC')
+      const ctrl = isMac ? e.metaKey : e.ctrlKey
+      if (!ctrl) return
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo() }
     }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
 
-    // PUT each department's board (including empty arrays to clear deleted tickets)
-    const allDepts = new Set([...Object.keys(byDept), ...departments])
-    const promises = Array.from(allDepts).map(async (dept) => {
-      try {
-        await api.updateDepartmentBoard(dept, byDept[dept] || [])
-      } catch {
-        // API unavailable — localStorage is the fallback
-      }
-    })
-
-    await Promise.all(promises)
-  }, [departments])
+  // ---------------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------------
 
   const loadData = useCallback(() => {
     setLoading(true)
     setError(null)
-
-    // Load kanban columns from config, then employees and board data
-    api.getConfig().then((cfg) => {
-      const kanban = cfg?.kanban as { columns?: Array<{ id: string; title: string }> } | undefined
-      if (kanban?.columns && Array.isArray(kanban.columns) && kanban.columns.length > 0) {
-        setColumns(kanban.columns)
-      }
-    }).catch(() => { /* config unavailable — use defaults */ })
 
     api
       .getOrg()
@@ -177,14 +149,28 @@ export default function KanbanPage() {
               status: string
               priority?: string
               assignee?: string
+              topicId?: string
               createdAt?: string
               updatedAt?: string
             }>
             if (Array.isArray(board)) {
+              // Build a set of valid column IDs from loaded config
+              const validColumns = new Set(kanban.config.columns.map((c) => c.id))
+              const defaultCol = kanban.config.columns.length > 0
+                ? [...kanban.config.columns].sort((a, b) => a.order - b.order)[0].id
+                : 'backlog'
+              // Legacy status mappings for backward compat
+              const legacyMap: Record<string, string> = {
+                in_progress: 'in-progress',
+                wip: 'in-progress',
+                rd: 'in-progress',
+                blocked: 'todo',
+              }
+
               for (const item of board) {
-                // Normalize status: underscores → hyphens, then resolve legacy aliases
-                const normalized = (item.status || 'backlog').replace(/_/g, '-')
-                const status = STATUS_ALIASES[normalized] || normalized
+                const rawStatus = item.status || ''
+                const mapped = legacyMap[rawStatus] ?? rawStatus
+                const status = validColumns.has(mapped) ? mapped : defaultCol
                 const priorityMap: Record<string, TicketPriority> = {
                   low: 'low',
                   medium: 'medium',
@@ -203,154 +189,96 @@ export default function KanbanPage() {
                   createdAt: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
                   updatedAt: item.updatedAt ? new Date(item.updatedAt).getTime() : Date.now(),
                   departmentId: dept,
+                  topicId: item.topicId ?? null,
                 }
               }
             }
           } catch {
-            // Department may not have a board.json, that's fine
+            // Department may not have a board.json — that's fine
           }
         }
 
-        // API is the sole source of truth on load. Do not merge localStorage —
-        // agent-made changes (moves, deletes) are only reflected in the API,
-        // and stale localStorage entries would cause ghost / wrong-state tickets.
-        setTickets(boardTickets)
+        kanban.initializeFromApi(boardTickets)
       })
-      .catch((e) => setError(e.message))
+      .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
-  // Persist tickets to both localStorage and the API whenever the store changes
-  useEffect(() => {
-    if (!loading) {
-      saveTickets(tickets)
-    }
-  }, [tickets, loading])
-
-  /**
-   * Persist the current ticket store back to each department's board via the
-   * gateway API. Tickets without a departmentId are silently skipped (they
-   * remain in localStorage only until a department can be assigned).
-   */
-  const persistToApi = useCallback(
-    async (store: KanbanStore) => {
-      // Group tickets by their department
-      const byDept: Record<string, KanbanTicket[]> = {}
-      for (const ticket of Object.values(store)) {
-        if (!ticket.departmentId) continue
-        if (!byDept[ticket.departmentId]) byDept[ticket.departmentId] = []
-        byDept[ticket.departmentId].push(ticket)
-      }
-
-      // Also PUT an empty array for any department that no longer has tickets
-      // so deleted tickets don't come back on the next reload
-      for (const dept of departments) {
-        if (!byDept[dept]) byDept[dept] = []
-      }
-
-      // Write each department board; errors are non-fatal (UI still works via localStorage)
-      await Promise.all(
-        Object.entries(byDept).map(([dept, deptTickets]) => {
-          const boardData = deptTickets.map((t) => ({
-            id: t.id,
-            title: t.title,
-            description: t.description,
-            status: t.status,
-            priority: t.priority,
-            assignee: t.assigneeId ?? undefined,
-            createdAt: new Date(t.createdAt).toISOString(),
-            updatedAt: new Date(t.updatedAt).toISOString(),
-          }))
-          return api.updateDepartmentBoard(dept, boardData).catch(() => {
-            // Silently ignore — department dir may not exist on disk yet
-          })
-        }),
-      )
-    },
-    [departments],
-  )
-
+  // ---------------------------------------------------------------------------
   // Keep selectedTicket in sync with store
+  // ---------------------------------------------------------------------------
+
   useEffect(() => {
     if (selectedTicket && tickets[selectedTicket.id]) {
       const current = tickets[selectedTicket.id]
       if (current.updatedAt !== selectedTicket.updatedAt) {
         setSelectedTicket(current)
       }
+    } else if (selectedTicket && !tickets[selectedTicket.id]) {
+      // Ticket was deleted (e.g. via undo)
+      setSelectedTicket(null)
     }
   }, [tickets, selectedTicket])
+
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
 
   function handleCreateTicket(data: {
     title: string
     description: string
     priority: TicketPriority
     assigneeId: string | null
+    topicId?: string | null
   }) {
-    // Infer department from assignee, fallback to first known department
-    const emp = data.assigneeId ? employees.find(e => e.name === data.assigneeId) : null
-    const departmentId = emp?.department || departments[0] || null
-
-    setTickets((prev) => {
-      const next = createTicket(prev, {
-        ...data,
-        status: 'backlog',
-        department: departmentId,
-        departmentId,
-      })
-      persistToApi(next)
-      return next
-    })
+    kanban.handleCreateTicket(data)
   }
 
   function handleMoveTicket(ticketId: string, status: TicketStatus) {
-    setTickets((prev) => {
-      const next = moveTicket(prev, ticketId, status)
-      persistToApi(next)
-      return next
-    })
+    const result = kanban.handleMoveTicket(ticketId, status)
+    if (!result.success && result.reason) {
+      pushDirect({
+        type: 'warning',
+        title: 'Déplacement bloqué',
+        message: result.reason,
+      })
+    }
   }
 
   function handleDeleteTicket(ticketId: string) {
-    setTickets((prev) => {
-      const next = deleteTicket(prev, ticketId)
-      persistToApi(next)
-      return next
-    })
+    kanban.handleDeleteTicket(ticketId)
     setSelectedTicket(null)
     setDeleteConfirm(null)
   }
 
   function handleAssigneeChange(ticketId: string, assigneeId: string | null) {
-    // Update department when assignee changes
-    const emp = assigneeId ? employees.find(e => e.name === assigneeId) : null
-    const updates: Partial<Omit<KanbanTicket, 'id' | 'createdAt'>> = { assigneeId }
-    if (emp?.department) {
-      updates.department = emp.department
-    }
-    setTickets((prev) => {
-      const next = updateTicket(prev, ticketId, updates)
-      persistToApi(next)
-      return next
-    })
+    kanban.handleAssigneeChange(ticketId, assigneeId)
   }
 
   function handleTicketClick(ticket: KanbanTicket) {
     setSelectedTicket(ticket)
+    setDispatcherOpen(false)
   }
+
+  function handleDispatcherOpen() {
+    setDispatcherOpen(true)
+    setSelectedTicket(null)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Error state
+  // ---------------------------------------------------------------------------
 
   if (error) {
     return (
       <PageLayout>
-        <div
-          className="flex flex-col items-center justify-center h-full gap-[var(--space-4)] text-[var(--text-tertiary)]"
-        >
-          <div
-            className="rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--system-red)_10%,transparent)] border border-[color-mix(in_srgb,var(--system-red)_30%,transparent)] px-[var(--space-4)] py-[var(--space-3)] text-[length:var(--text-body)] text-[var(--system-red)]"
-          >
+        <div className="flex flex-col items-center justify-center h-full gap-[var(--space-4)] text-[var(--text-tertiary)]">
+          <div className="rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--system-red)_10%,transparent)] border border-[color-mix(in_srgb,var(--system-red)_30%,transparent)] px-[var(--space-4)] py-[var(--space-3)] text-[length:var(--text-body)] text-[var(--system-red)]">
             Failed to load employees: {error}
           </div>
           <button
@@ -364,42 +292,89 @@ export default function KanbanPage() {
     )
   }
 
-  const ticketCount = Object.keys(tickets).length
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
-  // Employees that have at least one ticket assigned
+  const ticketCount = Object.keys(tickets).length
   const assignedEmployeeNames = new Set(
-    Object.values(tickets)
-      .map((t) => t.assigneeId)
-      .filter(Boolean),
+    Object.values(tickets).map((t) => t.assigneeId).filter(Boolean),
   )
   const assignedEmployees = employees.filter((e) => assignedEmployeeNames.has(e.name))
+  const allTickets = Object.values(tickets)
 
   return (
     <PageLayout>
       <div className="flex h-full relative bg-[var(--bg)]">
         {/* Board area */}
         <div className="flex-1 h-full flex flex-col min-w-0">
+
           {/* Header */}
-          <div
-            className="px-[var(--space-5)] py-[var(--space-4)] flex items-center justify-between shrink-0 border-b border-[var(--separator)]"
-          >
+          <div className="px-[var(--space-5)] py-[var(--space-4)] flex items-center justify-between shrink-0 border-b border-[var(--separator)]">
             <div>
-              <h1
-                className="text-[length:var(--text-title2)] font-[var(--weight-bold)] text-[var(--text-primary)] m-0 tracking-[-0.3px]"
-              >
+              <h1 className="text-[length:var(--text-title2)] font-[var(--weight-bold)] text-[var(--text-primary)] m-0 tracking-[-0.3px]">
                 Kanban Board
               </h1>
-              <p
-                className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mt-[2px] mb-0"
-              >
+              <p className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mt-[2px] mb-0">
                 {ticketCount} ticket{ticketCount !== 1 ? 's' : ''}
+                {config !== undefined && config.columns.length > 0 && (
+                  <span className="ml-[var(--space-2)] text-[var(--text-quaternary)]">
+                    · {config.columns.length} colonnes
+                  </span>
+                )}
               </p>
             </div>
 
             <ToolbarActions>
+              {/* Undo */}
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                aria-label="Undo"
+                className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] border border-[var(--separator)] bg-transparent cursor-pointer transition-all duration-150"
+                style={{
+                  color: canUndo ? 'var(--text-secondary)' : 'var(--text-quaternary)',
+                  opacity: canUndo ? 1 : 0.4,
+                }}
+              >
+                <Undo2 size={14} />
+              </button>
+
+              {/* Redo */}
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Shift+Z)"
+                aria-label="Redo"
+                className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] border border-[var(--separator)] bg-transparent cursor-pointer transition-all duration-150"
+                style={{
+                  color: canRedo ? 'var(--text-secondary)' : 'var(--text-quaternary)',
+                  opacity: canRedo ? 1 : 0.4,
+                }}
+              >
+                <Redo2 size={14} />
+              </button>
+
+              {/* Dispatcher toggle */}
+              <button
+                onClick={dispatcherOpen ? () => setDispatcherOpen(false) : handleDispatcherOpen}
+                title="Dispatcher — bulk assign / move"
+                className="flex items-center gap-[var(--space-1)] px-[var(--space-3)] h-8 rounded-[var(--radius-md)] border text-[length:var(--text-caption1)] font-[var(--weight-semibold)] cursor-pointer transition-all duration-150"
+                style={{
+                  borderColor: dispatcherOpen ? 'var(--accent)' : 'var(--separator)',
+                  background: dispatcherOpen ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent',
+                  color: dispatcherOpen ? 'var(--accent)' : 'var(--text-secondary)',
+                }}
+              >
+                <Users size={13} />
+                Dispatch
+              </button>
+
+              {/* New ticket */}
               <button
                 onClick={() => setCreateOpen(true)}
-                className="rounded-[var(--radius-md)] px-4 py-2 text-[length:var(--text-footnote)] font-[var(--weight-semibold)] border-none flex items-center gap-[var(--space-2)] bg-[var(--accent)] text-white cursor-pointer"
+                className="rounded-[var(--radius-md)] px-4 h-8 text-[length:var(--text-footnote)] font-[var(--weight-semibold)] border-none flex items-center gap-[var(--space-2)] bg-[var(--accent)] text-white cursor-pointer"
               >
                 <Plus size={16} />
                 New Ticket
@@ -409,9 +384,7 @@ export default function KanbanPage() {
 
           {/* Employee filter bar */}
           {assignedEmployees.length > 0 && (
-            <div
-              className="flex items-center gap-[var(--space-2)] px-[var(--space-5)] py-[var(--space-2)] overflow-x-auto shrink-0"
-            >
+            <div className="flex items-center gap-[var(--space-2)] px-[var(--space-5)] py-[var(--space-2)] overflow-x-auto shrink-0">
               <button
                 onClick={() => setFilterEmployeeId(null)}
                 className={`flex items-center gap-[var(--space-1)] px-3 py-1 rounded-full border-none text-[length:var(--text-caption1)] font-semibold cursor-pointer shrink-0 ${
@@ -425,9 +398,7 @@ export default function KanbanPage() {
               {assignedEmployees.map((emp) => (
                 <button
                   key={emp.name}
-                  onClick={() =>
-                    setFilterEmployeeId(filterEmployeeId === emp.name ? null : emp.name)
-                  }
+                  onClick={() => setFilterEmployeeId(filterEmployeeId === emp.name ? null : emp.name)}
                   className={`flex items-center gap-[var(--space-1)] px-3 py-1 rounded-full border-none text-[length:var(--text-caption1)] font-semibold cursor-pointer shrink-0 ${
                     filterEmployeeId === emp.name
                       ? 'bg-[var(--accent)] text-white'
@@ -443,16 +414,15 @@ export default function KanbanPage() {
           {/* Board */}
           <div className="flex-1 px-[var(--space-3)] min-h-0">
             {loading ? (
-              <div
-                className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-[length:var(--text-caption1)]"
-              >
+              <div className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-[length:var(--text-caption1)]">
                 Loading...
               </div>
             ) : (
               <KanbanBoard
                 tickets={tickets}
                 employees={employees}
-                columns={columns}
+                columns={config.columns}
+                topics={config.topics}
                 onTicketClick={handleTicketClick}
                 onMoveTicket={handleMoveTicket}
                 onCreateTicket={() => setCreateOpen(true)}
@@ -464,19 +434,34 @@ export default function KanbanPage() {
         </div>
 
         {/* Mobile backdrop */}
-        {selectedTicket && (
+        {(selectedTicket || dispatcherOpen) && (
           <div
-            className="fixed inset-0 z-30 lg:hidden bg-black/50"
-            onClick={() => setSelectedTicket(null)}
+            className="fixed inset-0 z-20 lg:hidden bg-black/50"
+            onClick={() => { setSelectedTicket(null); setDispatcherOpen(false) }}
           />
         )}
 
-        {/* Detail panel */}
-        {selectedTicket && (
+        {/* Dispatcher panel */}
+        {dispatcherOpen && (
+          <div className="absolute top-0 right-0 bottom-0 z-30 flex">
+            <DispatcherPanel
+              tickets={allTickets}
+              employees={employees}
+              config={config}
+              onBulkAssign={kanban.handleBulkAssign}
+              onBulkMove={kanban.handleBulkMove}
+              onClose={() => setDispatcherOpen(false)}
+            />
+          </div>
+        )}
+
+        {/* Ticket detail panel */}
+        {selectedTicket && !dispatcherOpen && (
           <TicketDetailPanel
             ticket={selectedTicket}
             employees={employees}
-            columns={columns}
+            columns={config.columns}
+            config={config}
             onClose={() => setSelectedTicket(null)}
             onStatusChange={(status) => handleMoveTicket(selectedTicket.id, status)}
             onAssigneeChange={(name) => handleAssigneeChange(selectedTicket.id, name)}
@@ -484,7 +469,7 @@ export default function KanbanPage() {
           />
         )}
 
-        {/* Delete confirmation dialog */}
+        {/* Delete confirmation */}
         {deleteConfirm && (
           <DeleteConfirmDialog
             ticket={deleteConfirm}
@@ -498,6 +483,7 @@ export default function KanbanPage() {
           open={createOpen}
           onOpenChange={setCreateOpen}
           employees={employees}
+          topics={config.topics}
           onSubmit={handleCreateTicket}
         />
       </div>

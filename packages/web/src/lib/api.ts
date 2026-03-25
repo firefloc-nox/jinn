@@ -214,6 +214,17 @@ export const api = {
     get<{ sessionId: string; events: Array<{ id: string; type: string; content: string | null; toolName: string | null; toolArgs: Record<string, unknown> | null; thinkingText: string | null; resultContent: string | null; timestamp: number }> }>(`/api/sessions/${id}/events`),
   getSessionTranscript: (id: string) =>
     get<TranscriptEntry[]>(`/api/sessions/${id}/transcript`),
+  // Kanban-specific endpoints (Ironcraft backend)
+  getKanbanConfig: () =>
+    get<Record<string, unknown>>('/api/kanban/config'),
+  putKanbanConfig: (config: unknown) =>
+    put<{ ok: boolean }>('/api/kanban/config', config),
+  bulkKanbanOps: (body: { ids: string[]; assigneeId?: string | null; targetColumn?: string }) =>
+    patch<{ moved: string[]; blocked: Array<{ id: string; reason: string }> }>('/api/kanban/tickets/bulk', body),
+  validateKanbanTransition: (from: string, to: string) =>
+    post<{ allowed: boolean }>('/api/kanban/validate-transition', { from, to }),
+  deleteTopic: (id: string) =>
+    del<{ ok: boolean }>(`/api/kanban/topics/${id}`),
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)

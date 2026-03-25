@@ -27,6 +27,8 @@ export interface NotificationContextValue {
   toasts: AppNotification[];
   /** Push a new notification from a WS event */
   pushFromEvent: (event: string, payload: Record<string, unknown>) => void;
+  /** Push a notification directly (e.g. local validation errors) — also shows as toast */
+  pushDirect: (notif: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
   /** Dismiss a toast */
   dismissToast: (id: string) => void;
   /** Mark all as read */
@@ -42,6 +44,7 @@ const NotificationContext = createContext<NotificationContextValue>({
   unreadCount: 0,
   toasts: [],
   pushFromEvent: () => {},
+  pushDirect: () => {},
   dismissToast: () => {},
   markAllRead: () => {},
   markRead: () => {},

@@ -1,0 +1,81 @@
+# Kanban board configuration
+# This file is auto-generated on first boot and hot-reloaded on changes.
+# Edit columns, topics, transitions, and dispatcher rules to customize your workflow.
+
+version: "1.0"
+
+# ─── Columns ───────────────────────────────────────────────────────────────
+# Each column represents a stage in the workflow.
+# "topic" is a preprompt injected into agent context for tickets in this column.
+columns:
+  - id: backlog
+    title: Backlog
+    order: 0
+    topic: >
+      Unprocessed work waiting for triage and prioritization.
+    color: "#6b7280"
+
+  - id: todo
+    title: To Do
+    order: 1
+    topic: >
+      Prioritized and ready for assignment.
+      Check dependencies before starting.
+    color: "#3b82f6"
+
+  - id: in-progress
+    title: In Progress
+    order: 2
+    topic: >
+      Actively being worked on.
+      Ensure steady progress and communicate blockers.
+    color: "#f59e0b"
+    wipLimit: 5
+    rules:
+      requiresAssignee: true
+
+  - id: review
+    title: Review
+    order: 3
+    topic: >
+      Awaiting peer review and approval.
+      Focus: code quality, security, performance.
+    color: "#8b5cf6"
+    rules:
+      requiresAssignee: true
+
+  - id: done
+    title: Done
+    order: 4
+    color: "#22c55e"
+
+# ─── Transitions ──────────────────────────────────────────────────────────
+# Explicit rules for column-to-column moves.
+# Use "*" as wildcard for any column.
+# When no explicit rule matches, the transition is allowed (permissive default).
+transitions:
+  - { from: backlog, to: done, allowed: false }
+  - { from: backlog, to: review, allowed: false }
+  - { from: "*", to: "*", allowed: true }
+
+# ─── Dispatcher ───────────────────────────────────────────────────────────
+# Auto-assignment engine for incoming tickets.
+dispatcher:
+  enabled: true
+  defaultColumn: backlog
+  autoAssignByDepartment: true
+  autoAssignByTopic: true
+  fallbackAssignee: null
+
+# ─── Topics ───────────────────────────────────────────────────────────────
+# Semantic groupings that provide context to agents working on tickets.
+# Create topics via the API or add them here directly.
+# Example:
+#   - id: "550e8400-e29b-41d4-a716-446655440000"
+#     name: Bug Fix
+#     description: "Fix a reported bug. Reproduce first, then implement minimal fix."
+#     color: "#ef4444"
+#     tags: [bug, fix]
+#     defaultAssignee: null
+#     defaultPriority: high
+topics: []

@@ -31,6 +31,7 @@ export const TEMPLATE_DIR = path.join(__dirname, "..", "..", "..", "template");
 export const FILES_DIR = path.join(JINN_HOME, "files");
 export const MIGRATIONS_DIR = path.join(JINN_HOME, "migrations");
 export const TEMPLATE_MIGRATIONS_DIR = path.join(TEMPLATE_DIR, "migrations");
+export const KANBAN_CONFIG = path.join(JINN_HOME, "kanban.config.yaml");
 
 /** Path to the global instances registry (always in default ~/.jinn/) */
 export const INSTANCES_REGISTRY = path.join(os.homedir(), ".jinn", "instances.json");

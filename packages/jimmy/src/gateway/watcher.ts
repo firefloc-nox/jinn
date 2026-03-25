@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { watch, type FSWatcher } from "chokidar";
-import { CONFIG_PATH, CRON_JOBS, ORG_DIR, SKILLS_DIR, CLAUDE_SKILLS_DIR, AGENTS_SKILLS_DIR } from "../shared/paths.js";
+import { CONFIG_PATH, CRON_JOBS, ORG_DIR, SKILLS_DIR, KANBAN_CONFIG, CLAUDE_SKILLS_DIR, AGENTS_SKILLS_DIR } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
 
 export interface WatcherCallbacks {
@@ -9,6 +9,7 @@ export interface WatcherCallbacks {
   onCronReload: () => void;
   onOrgChange: () => void;
   onSkillsChange: () => void;
+  onKanbanConfigReload?: () => void;
 }
 
 let watchers: FSWatcher[] = [];
@@ -128,7 +129,20 @@ export function startWatchers(callbacks: WatcherCallbacks): void {
     }, DEBOUNCE_MS),
   );
 
-  watchers = [configWatcher, cronWatcher, orgWatcher, skillsWatcher];
+  // Watch kanban.config.yaml for column/topic/transition changes
+  const kanbanWatcher = watch(KANBAN_CONFIG, {
+    ignoreInitial: true,
+    awaitWriteFinish: { stabilityThreshold: 300 },
+  });
+  kanbanWatcher.on(
+    "change",
+    debounce(() => {
+      logger.info("kanban.config.yaml changed, reloading...");
+      callbacks.onKanbanConfigReload?.();
+    }, DEBOUNCE_MS),
+  );
+
+  watchers = [configWatcher, cronWatcher, orgWatcher, skillsWatcher, kanbanWatcher];
   logger.info("File watchers started");
 }
 

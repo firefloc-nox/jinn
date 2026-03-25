@@ -1,12 +1,14 @@
 "use client"
 
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
-import type { KanbanColumn as KanbanColumnType, KanbanTicket, TicketStatus } from '@/lib/kanban/types'
+import { Plus, AlertTriangle } from 'lucide-react'
+import type { KanbanColumn as KanbanColumnType, KanbanTicket, TicketStatus, KanbanTopic } from '@/lib/kanban/types'
 
 interface KanbanColumnProps {
   column: KanbanColumnType
   tickets: KanbanTicket[]
+  topics?: KanbanTopic[]
+  isFirstColumn?: boolean   // replaces hardcoded column.id === 'backlog'
   onDrop: (ticketId: string, status: TicketStatus) => void
   onCreateTicket?: () => void
   renderTicket: (ticket: KanbanTicket) => React.ReactNode
@@ -15,6 +17,8 @@ interface KanbanColumnProps {
 export function KanbanColumn({
   column,
   tickets,
+  topics = [],
+  isFirstColumn = false,
   onDrop,
   onCreateTicket,
   renderTicket,
@@ -43,6 +47,20 @@ export function KanbanColumn({
     }
   }
 
+  // WIP limit tracking
+  const wipLimit = column.wipLimit
+  const wipExceeded = wipLimit !== undefined && tickets.length > wipLimit
+  const wipWarning = wipLimit !== undefined && !wipExceeded && tickets.length === wipLimit
+
+  // Topic summary: count tickets per topic in this column
+  const topicCounts: Record<string, number> = {}
+  for (const t of tickets) {
+    if (t.topicId) topicCounts[t.topicId] = (topicCounts[t.topicId] ?? 0) + 1
+  }
+  const topicsInColumn = topics.filter((tp) => topicCounts[tp.id])
+
+  const accentColor = column.color ?? 'var(--separator)'
+
   return (
     <div
       onDragOver={handleDragOver}
@@ -54,20 +72,43 @@ export function KanbanColumn({
         border: isDragOver
           ? '2px dashed var(--accent)'
           : '2px dashed transparent',
+        borderTop: `3px solid ${accentColor}`,
       }}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between p-[var(--space-3)_var(--space-4)] shrink-0">
+      <div className="flex items-center justify-between p-[var(--space-3)_var(--space-4)_var(--space-2)] shrink-0">
         <div className="flex items-center gap-[var(--space-2)]">
           <span className="text-[length:var(--text-footnote)] font-[var(--weight-semibold)] text-[var(--text-primary)] tracking-[-0.01em]">
             {column.title}
           </span>
-          <span className="text-[length:var(--text-caption2)] font-[var(--weight-medium)] text-[var(--text-tertiary)] bg-[var(--fill-secondary)] rounded-[var(--radius-sm)] py-px px-1.5 min-w-[20px] text-center">
-            {tickets.length}
+
+          {/* Ticket count / WIP indicator */}
+          <span
+            className="text-[length:var(--text-caption2)] font-[var(--weight-medium)] rounded-[var(--radius-sm)] py-px px-1.5 min-w-[20px] text-center transition-colors"
+            style={{
+              background: wipExceeded
+                ? 'color-mix(in srgb, var(--system-red) 18%, transparent)'
+                : wipWarning
+                ? 'color-mix(in srgb, var(--system-orange) 18%, transparent)'
+                : 'var(--fill-secondary)',
+              color: wipExceeded
+                ? 'var(--system-red)'
+                : wipWarning
+                ? 'var(--system-orange)'
+                : 'var(--text-tertiary)',
+            }}
+          >
+            {wipLimit !== undefined ? `${tickets.length}/${wipLimit}` : tickets.length}
           </span>
+
+          {wipExceeded && (
+            <span aria-label="WIP limit exceeded" title="WIP limit exceeded">
+              <AlertTriangle size={12} className="text-[var(--system-red)]" />
+            </span>
+          )}
         </div>
 
-        {column.id === 'backlog' && onCreateTicket && (
+        {isFirstColumn && onCreateTicket && (
           <button
             onClick={onCreateTicket}
             aria-label="Create new ticket"
@@ -77,6 +118,26 @@ export function KanbanColumn({
           </button>
         )}
       </div>
+
+      {/* Topic pills (compact row) */}
+      {topicsInColumn.length > 0 && (
+        <div className="flex gap-[var(--space-1)] flex-wrap px-[var(--space-3)] pb-[var(--space-2)] shrink-0">
+          {topicsInColumn.map((tp) => (
+            <span
+              key={tp.id}
+              className="text-[length:var(--text-caption2)] rounded-full px-[6px] py-px font-[var(--weight-medium)]"
+              style={{
+                background: `color-mix(in srgb, ${tp.color} 14%, transparent)`,
+                color: tp.color,
+                border: `1px solid color-mix(in srgb, ${tp.color} 30%, transparent)`,
+              }}
+              title={tp.name}
+            >
+              {tp.name} · {topicCounts[tp.id]}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Scrollable ticket area */}
       <div className="flex-1 overflow-y-auto px-[var(--space-2)] pb-[var(--space-2)] flex flex-col gap-[var(--space-2)]">

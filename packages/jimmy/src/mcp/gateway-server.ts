@@ -184,6 +184,25 @@ const TOOLS = [
       required: ["jobId"],
     },
   },
+  {
+    name: "get_kanban_config",
+    description: "Get the kanban board configuration: columns, topics, transition rules, and dispatcher settings.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "get_topic_context",
+    description: "Get the preprompt/context for a kanban topic or column. Use this to understand what a ticket's topic or current column expects.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        topicId: { type: "string", description: "Topic ID (UUID) to get context for" },
+        columnId: { type: "string", description: "Column ID to get the column topic/preprompt for" },
+      },
+    },
+  },
 ];
 
 // ─── API Helpers ───
@@ -314,6 +333,25 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
         ...(args.prompt ? { prompt: args.prompt } : {}),
       });
       return JSON.stringify(result);
+    }
+
+    case "get_kanban_config": {
+      const config = await apiGet("/api/kanban/config");
+      return JSON.stringify(config);
+    }
+
+    case "get_topic_context": {
+      const config = await apiGet("/api/kanban/config") as any;
+      const results: Record<string, string | null> = {};
+      if (args.topicId) {
+        const topic = (config.topics ?? []).find((t: any) => t.id === args.topicId);
+        results.topicContext = topic?.description ?? null;
+      }
+      if (args.columnId) {
+        const col = (config.columns ?? []).find((c: any) => c.id === args.columnId);
+        results.columnTopic = col?.topic ?? null;
+      }
+      return JSON.stringify(results);
     }
 
     default:

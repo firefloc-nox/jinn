@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import type { Employee } from '@/lib/api'
-import type { TicketPriority } from '@/lib/kanban/types'
+import type { TicketPriority, KanbanTopic } from '@/lib/kanban/types'
 import { PRIORITY_COLORS } from '@/lib/kanban/types'
 import { EmployeePicker } from './employee-picker'
+import { TopicBadge } from './topic-badge'
 import {
   Dialog,
   DialogContent,
@@ -18,11 +19,13 @@ interface CreateTicketModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   employees: Employee[]
+  topics?: KanbanTopic[]
   onSubmit: (ticket: {
     title: string
     description: string
     priority: TicketPriority
     assigneeId: string | null
+    topicId: string | null
   }) => void
 }
 
@@ -38,12 +41,14 @@ const initialState = {
   description: '',
   priority: 'medium' as TicketPriority,
   assigneeId: '' as string,
+  topicId: '' as string,
 }
 
 export function CreateTicketModal({
   open,
   onOpenChange,
   employees,
+  topics = [],
   onSubmit,
 }: CreateTicketModalProps) {
   const [form, setForm] = useState(initialState)
@@ -57,6 +62,18 @@ export function CreateTicketModal({
     onOpenChange(next)
   }
 
+  // When a topic is selected, auto-fill priority and assignee from topic defaults
+  useEffect(() => {
+    if (!form.topicId) return
+    const topic = topics.find((t) => t.id === form.topicId)
+    if (!topic) return
+    setForm((f) => ({
+      ...f,
+      priority: topic.defaultPriority ?? f.priority,
+      assigneeId: topic.defaultAssignee ?? f.assigneeId,
+    }))
+  }, [form.topicId, topics])
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.title.trim()) return
@@ -66,11 +83,14 @@ export function CreateTicketModal({
       description: form.description.trim(),
       priority: form.priority,
       assigneeId: form.assigneeId || null,
+      topicId: form.topicId || null,
     })
 
     resetForm()
     onOpenChange(false)
   }
+
+  const selectedTopic = topics.find((t) => t.id === form.topicId) ?? null
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -115,6 +135,35 @@ export function CreateTicketModal({
             />
           </div>
 
+          {/* Topic picker — shown only when topics exist */}
+          {topics.length > 0 && (
+            <div className="flex flex-col gap-[var(--space-1)]">
+              <label className="text-[length:var(--text-caption1)] font-[var(--weight-medium)] text-[var(--text-secondary)]">
+                Topic
+              </label>
+              <div className="flex items-center gap-[var(--space-2)]">
+                <select
+                  value={form.topicId}
+                  onChange={(e) => setForm((f) => ({ ...f, topicId: e.target.value }))}
+                  className="flex-1 text-[length:var(--text-body)] text-[var(--text-primary)] py-2 px-3 border border-[var(--separator)] rounded-[var(--radius-md)] bg-[var(--fill-tertiary)] outline-none font-[inherit]"
+                >
+                  <option value="">No topic</option>
+                  {topics.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedTopic && <TopicBadge topic={selectedTopic} />}
+              </div>
+              {selectedTopic?.description && (
+                <p className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] m-0 leading-[1.4]">
+                  {selectedTopic.description}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Description */}
           <div className="flex flex-col gap-[var(--space-1)]">
             <label
@@ -135,9 +184,7 @@ export function CreateTicketModal({
 
           {/* Priority */}
           <div className="flex flex-col gap-[var(--space-2)]">
-            <span
-              className="text-[length:var(--text-caption1)] font-[var(--weight-medium)] text-[var(--text-secondary)]"
-            >
+            <span className="text-[length:var(--text-caption1)] font-[var(--weight-medium)] text-[var(--text-secondary)]">
               Priority
             </span>
             <div className="flex gap-[var(--space-2)]">
@@ -170,9 +217,7 @@ export function CreateTicketModal({
 
           {/* Assignee */}
           <div className="flex flex-col gap-[var(--space-1)]">
-            <label
-              className="text-[length:var(--text-caption1)] font-[var(--weight-medium)] text-[var(--text-secondary)]"
-            >
+            <label className="text-[length:var(--text-caption1)] font-[var(--weight-medium)] text-[var(--text-secondary)]">
               Assignee
             </label>
             <EmployeePicker

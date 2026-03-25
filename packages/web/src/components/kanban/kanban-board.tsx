@@ -1,7 +1,8 @@
 "use client"
 
-import { DEFAULT_COLUMNS } from '@/lib/kanban/types'
-import type { KanbanTicket, TicketStatus, KanbanColumn as KanbanColumnDef } from '@/lib/kanban/types'
+import { memo } from 'react'
+import { COLUMNS } from '@/lib/kanban/types'
+import type { KanbanTicket, TicketStatus, KanbanColumn as KanbanColumnType, KanbanTopic } from '@/lib/kanban/types'
 import type { KanbanStore } from '@/lib/kanban/store'
 import { getTicketsByStatus } from '@/lib/kanban/store'
 import type { Employee } from '@/lib/api'
@@ -11,7 +12,8 @@ import { TicketCard } from './ticket-card'
 interface KanbanBoardProps {
   tickets: KanbanStore
   employees: Employee[]
-  columns?: KanbanColumnDef[]
+  columns?: KanbanColumnType[]       // dynamic config columns; falls back to COLUMNS
+  topics?: KanbanTopic[]
   onTicketClick: (ticket: KanbanTicket) => void
   onMoveTicket: (ticketId: string, status: TicketStatus) => void
   onCreateTicket: () => void
@@ -19,17 +21,24 @@ interface KanbanBoardProps {
   filterEmployeeId?: string | null
 }
 
-export function KanbanBoard({
+export const KanbanBoard = memo(function KanbanBoard({
   tickets,
   employees,
   columns,
+  topics = [],
   onTicketClick,
   onMoveTicket,
   onCreateTicket,
   onDeleteTicket,
   filterEmployeeId,
 }: KanbanBoardProps) {
-  const cols = columns ?? DEFAULT_COLUMNS
+  // Use dynamic columns from config if provided, otherwise backward-compat COLUMNS
+  const activeColumns = (columns && columns.length > 0)
+    ? [...columns].sort((a, b) => a.order - b.order)
+    : COLUMNS
+
+  const firstColumnId = activeColumns[0]?.id
+
   return (
     <div
       style={{
@@ -42,7 +51,7 @@ export function KanbanBoard({
         WebkitOverflowScrolling: 'touch',
       }}
     >
-      {cols.map((column) => {
+      {activeColumns.map((column) => {
         const allColumnTickets = getTicketsByStatus(tickets, column.id)
         const columnTickets = filterEmployeeId
           ? allColumnTickets.filter((t) => t.assigneeId === filterEmployeeId)
@@ -53,8 +62,10 @@ export function KanbanBoard({
             key={column.id}
             column={column}
             tickets={columnTickets}
+            topics={topics}
+            isFirstColumn={column.id === firstColumnId}
             onDrop={onMoveTicket}
-            onCreateTicket={column.id === 'backlog' ? onCreateTicket : undefined}
+            onCreateTicket={column.id === firstColumnId ? onCreateTicket : undefined}
             renderTicket={(ticket) => {
               const emp = employees.find((e) => e.name === ticket.assigneeId)
               return (
@@ -71,4 +82,4 @@ export function KanbanBoard({
       })}
     </div>
   )
-}
+})

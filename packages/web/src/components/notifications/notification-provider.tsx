@@ -42,6 +42,26 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const pushDirect = useCallback(
+    (notif: Omit<AppNotification, "id" | "timestamp" | "read">) => {
+      const n: AppNotification = {
+        ...notif,
+        id: generateId(),
+        timestamp: Date.now(),
+        read: false,
+      };
+      setNotifications((prev) => [n, ...prev].slice(0, 50));
+      setToasts((prev) => [...prev, n]);
+      initialized.current = true;
+      const timer = setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== n.id));
+        toastTimers.current.delete(n.id);
+      }, TOAST_DURATION_MS);
+      toastTimers.current.set(n.id, timer);
+    },
+    [],
+  );
+
   const addNotification = useCallback(
     (event: string, payload: Record<string, unknown>) => {
       const template = wsEventToNotification(event, payload);
@@ -103,6 +123,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         unreadCount,
         toasts,
         pushFromEvent: addNotification,
+        pushDirect,
         dismissToast,
         markAllRead,
         markRead,
