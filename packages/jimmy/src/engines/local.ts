@@ -63,6 +63,9 @@ export class LocalEngine implements InterruptibleEngine {
 
     const controller = new AbortController();
     if (opts.sessionId) {
+      // Abort any previous run for this session before replacing the controller
+      const previous = this.liveControllers.get(opts.sessionId);
+      if (previous) previous.abort("superseded by new run");
       this.liveControllers.set(opts.sessionId, controller);
     }
 
@@ -93,8 +96,20 @@ export class LocalEngine implements InterruptibleEngine {
         }
 
         // Timeout after 5 minutes to avoid hanging on unresponsive servers
-        const timeoutSignal = AbortSignal.timeout(300_000);
-        const combinedSignal = AbortSignal.any([controller.signal, timeoutSignal]);
+        // AbortSignal.any() requires Node >= 22; fall back to manual wiring on older versions
+        let combinedSignal: AbortSignal;
+        if (typeof AbortSignal.any === "function") {
+          const timeoutSignal = AbortSignal.timeout(300_000);
+          combinedSignal = AbortSignal.any([controller.signal, timeoutSignal]);
+        } else {
+          const timeoutController = new AbortController();
+          const timer = setTimeout(() => timeoutController.abort("timeout"), 300_000);
+          controller.signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            timeoutController.abort(controller.signal.reason);
+          }, { once: true });
+          combinedSignal = timeoutController.signal;
+        }
 
         const response = await fetch(`${this.url}/v1/chat/completions`, {
           method: "POST",

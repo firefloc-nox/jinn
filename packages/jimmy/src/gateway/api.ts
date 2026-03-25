@@ -751,22 +751,41 @@ export async function handleApiRequest(
       const body = _parsed.body as any;
       const query = body.query || "";
       if (!query) return badRequest(res, "query is required");
+      // Sanitize query: limit length and normalize for safe matching
+      const safeQuery = String(query).slice(0, 200).toLowerCase();
 
       // List knowledge files that match the query (case-insensitive)
       const knowledgeDir = path.join(JINN_HOME, "knowledge");
       const docsDir = path.join(JINN_HOME, "docs");
       const results = [];
+      const MAX_FILES_SCANNED = 50;
+      let filesScanned = 0;
 
       for (const dir of [knowledgeDir, docsDir]) {
         if (!fs.existsSync(dir)) continue;
         const files = fs.readdirSync(dir);
         for (const file of files) {
+          if (filesScanned >= MAX_FILES_SCANNED) break;
           if (!file.endsWith(".md")) continue;
+          filesScanned++;
+          const filePath = path.join(dir, file);
+          // Resolve symlinks and verify the real path stays within allowed dirs
+          let realPath: string;
+          try {
+            realPath = fs.realpathSync(filePath);
+          } catch {
+            continue; // broken symlink — skip
+          }
+          const realKnowledge = fs.existsSync(knowledgeDir) ? fs.realpathSync(knowledgeDir) : knowledgeDir;
+          const realDocs = fs.existsSync(docsDir) ? fs.realpathSync(docsDir) : docsDir;
+          if (!realPath.startsWith(realKnowledge + path.sep) && !realPath.startsWith(realDocs + path.sep)) {
+            continue; // symlink escapes allowed directories — skip
+          }
           // Simple keyword matching
-          if (file.toLowerCase().includes(query.toLowerCase()) ||
-              file.toLowerCase().replace(/-|_/g, " ").includes(query.toLowerCase())) {
-            const filePath = path.join(dir, file);
-            const stat = fs.statSync(filePath);
+          const fileLower = file.toLowerCase();
+          if (fileLower.includes(safeQuery) ||
+              fileLower.replace(/-|_/g, " ").includes(safeQuery)) {
+            const stat = fs.statSync(realPath);
             results.push({
               name: file,
               path: filePath.replace(JINN_HOME, "~/.jinn"),
@@ -775,6 +794,7 @@ export async function handleApiRequest(
             });
           }
         }
+        if (filesScanned >= MAX_FILES_SCANNED) break;
       }
 
       return json(res, {
@@ -2279,12 +2299,18 @@ async function runWebSession(
         .filter((m) => m.role === "user" || m.role === "assistant");
       // Only include history if there are prior turns (not just the current message)
       if (history.length > 1) {
-        // Budget: keep history under ~4000 chars to leave room for system prompt + response
-        const maxHistoryChars = (config.engines?.local?.maxContextChars ?? 12_000) / 3;
+        // Reserve 8000 chars for system prompt + response, give the rest to history
+        const SYSTEM_PROMPT_RESERVE = 8_000;
+        const totalBudget = config.engines?.local?.maxContextChars ?? 12_000;
+        const maxHistoryChars = Math.max(1_000, totalBudget - SYSTEM_PROMPT_RESERVE);
         const recent = history.slice(-8); // Last 8 messages (4 turns)
         let historyText = "";
         for (let i = recent.length - 1; i >= 0; i--) {
-          const entry = `${recent[i].role.toUpperCase()}: ${recent[i].content}`;
+          // Escape XML-like tags in user content to prevent prompt injection
+          const safeContent = recent[i].content
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          const entry = `${recent[i].role.toUpperCase()}: ${safeContent}`;
           if (historyText.length + entry.length > maxHistoryChars) break;
           historyText = entry + "\n\n" + historyText;
         }
