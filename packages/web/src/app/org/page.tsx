@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import type { Employee, OrgData, OrgTreeData } from "@/lib/api";
 import { EmployeeDetail } from "@/components/org/employee-detail";
+import { EmployeeFormDialog } from "@/components/org/employee-form-dialog";
 import { GridView } from "@/components/org/grid-view";
 import { FeedView } from "@/components/org/feed-view";
 import { PageLayout } from "@/components/page-layout";
@@ -28,10 +29,12 @@ export default function OrgPage() {
   useBreadcrumbs([{ label: 'Organization' }])
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [orgTree, setOrgTree] = useState<OrgTreeData | null>(null);
+  const [departments, setDepartments] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Employee | null>(null);
   const [view, setView] = useState<string>("map");
+  const [showNewDialog, setShowNewDialog] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
 
@@ -71,6 +74,7 @@ export default function OrgPage() {
         };
         setEmployees([coo, ...details]);
         setOrgTree(treeData);
+        setDepartments(data.departments);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -123,6 +127,17 @@ export default function OrgPage() {
   return (
     <PageLayout>
       <div className="flex h-full relative bg-[var(--bg)]">
+        {/* New employee dialog */}
+        <EmployeeFormDialog
+          open={showNewDialog}
+          onClose={() => setShowNewDialog(false)}
+          departments={departments}
+          onSaved={() => {
+            setShowNewDialog(false);
+            loadData();
+          }}
+        />
+
         {/* Main content area */}
         <div className="flex-1 h-full relative">
           <Tabs
@@ -131,12 +146,33 @@ export default function OrgPage() {
             className="h-full flex flex-col"
           >
             {/* Tab bar at top */}
-            <div className="absolute top-[var(--space-4)] left-[var(--space-4)] z-10">
+            <div className="absolute top-[var(--space-4)] left-[var(--space-4)] z-10 flex items-center gap-[var(--space-2)]">
               <TabsList>
                 <TabsTrigger value="map">Map</TabsTrigger>
                 <TabsTrigger value="grid">Grid</TabsTrigger>
                 <TabsTrigger value="list">List</TabsTrigger>
               </TabsList>
+              <button
+                onClick={() => setShowNewDialog(true)}
+                title="New employee"
+                style={{
+                  height: 32,
+                  padding: "0 var(--space-3)",
+                  borderRadius: "var(--radius-md, 10px)",
+                  background: "var(--accent)",
+                  color: "var(--accent-contrast)",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "var(--text-caption1)",
+                  fontWeight: "var(--weight-semibold)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
+                New Employee
+              </button>
             </div>
 
             <TabsContent value="map" className="flex-1">
@@ -213,6 +249,8 @@ export default function OrgPage() {
                 <EmployeeDetail
                   name={selected.name}
                   prefetched={selected.rank === "executive" ? selected : undefined}
+                  onDeleted={() => { setSelected(null); loadData(); }}
+                  onUpdated={() => loadData()}
                 />
               </div>
             </div>

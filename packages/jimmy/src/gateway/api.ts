@@ -1138,18 +1138,47 @@ Handle this request as a priority task from your chain of command. Assign it to 
       return json(res, content);
     }
 
-    // PATCH /api/org/employees/:name — update employee fields (currently only alwaysNotify)
+    // POST /api/org/employees — create a new employee
+    if (method === "POST" && pathname === "/api/org/employees") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+      if (!body.name || !body.displayName || !body.persona) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing required fields: name, displayName, persona" }));
+        return;
+      }
+      const { createEmployeeYaml } = await import("./org.js");
+      const filePath = createEmployeeYaml(body);
+      if (!filePath) {
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Employee "${body.name}" already exists` }));
+        return;
+      }
+      context.emit("org:updated", { employee: body.name, action: "created" });
+      return json(res, { status: "ok", name: body.name.toLowerCase().replace(/\s+/g, "-") });
+    }
+
+    // PATCH /api/org/employees/:name — update employee fields
     params = matchRoute("/api/org/employees/:name", pathname);
     if (method === "PATCH" && params) {
       const _parsed = await readJsonBody(req, res);
       if (!_parsed.ok) return;
       const body = _parsed.body as any;
       const { updateEmployeeYaml } = await import("./org.js");
-      const updated = updateEmployeeYaml(params.name, {
-        alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
-      });
+      const updated = updateEmployeeYaml(params.name, body);
       if (!updated) return notFound(res);
       context.emit("org:updated", { employee: params.name });
+      return json(res, { status: "ok" });
+    }
+
+    // DELETE /api/org/employees/:name — delete an employee
+    params = matchRoute("/api/org/employees/:name", pathname);
+    if (method === "DELETE" && params) {
+      const { deleteEmployeeYaml } = await import("./org.js");
+      const deleted = deleteEmployeeYaml(params.name);
+      if (!deleted) return notFound(res);
+      context.emit("org:updated", { employee: params.name, action: "deleted" });
       return json(res, { status: "ok" });
     }
 

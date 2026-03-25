@@ -28,7 +28,11 @@ export interface Employee {
   model: string;
   persona: string;
   emoji?: string;
+  effortLevel?: string;
   alwaysNotify?: boolean;
+  cliFlags?: string[];
+  mcp?: boolean | string[];
+  maxCostUsd?: number;
 }
 
 export interface OrgData {
@@ -151,8 +155,12 @@ export const api = {
   getOrg: () => get<OrgData>("/api/org"),
   getOrgTree: () => get<OrgTreeData>("/api/org/tree"),
   getEmployee: (name: string) => get<Employee>(`/api/org/employees/${name}`),
-  updateEmployee: (name: string, data: { alwaysNotify?: boolean }) =>
+  createEmployee: (data: Partial<Employee> & { name: string; displayName: string; persona: string }) =>
+    post<{ status: string; name: string }>("/api/org/employees", data),
+  updateEmployee: (name: string, data: Partial<Employee>) =>
     patch<{ status: string }>(`/api/org/employees/${name}`, data),
+  deleteEmployee: (name: string) =>
+    del<{ status: string }>(`/api/org/employees/${name}`),
   getDepartmentBoard: (name: string) =>
     get<Record<string, unknown>>(`/api/org/departments/${name}/board`),
   getSkills: () => get<Record<string, unknown>[]>("/api/skills"),

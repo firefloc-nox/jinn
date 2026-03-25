@@ -6,9 +6,38 @@ import {
   useEdgesState,
   type Node,
   type Edge,
+  type NodeChange,
   ConnectionLineType,
 } from "@xyflow/react"
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useRef } from "react"
+
+const POSITIONS_KEY = "jinn-org-node-positions"
+
+function loadPositions(): Record<string, { x: number; y: number }> {
+  try {
+    const raw = localStorage.getItem(POSITIONS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function savePositions(nodes: Node[]) {
+  try {
+    const saved: Record<string, { x: number; y: number }> = {}
+    for (const n of nodes) {
+      // Only save employee nodes (not group boxes)
+      if (!n.id.startsWith("grp:")) saved[n.id] = n.position
+    }
+    localStorage.setItem(POSITIONS_KEY, JSON.stringify(saved))
+  } catch { /* noop */ }
+}
+
+function applyPositions(nodes: Node[], positions: Record<string, { x: number; y: number }>): Node[] {
+  return nodes.map((n) => {
+    if (n.parentId) return n // Don't override nodes inside groups
+    const saved = positions[n.id]
+    return saved ? { ...n, position: saved } : n
+  })
+}
 import dagre from "@dagrejs/dagre"
 import type { Employee, OrgTreeData, OrgTreeNode } from "@/lib/api"
 import { nodeTypes } from "@/components/org/employee-node"
@@ -87,7 +116,7 @@ function buildTreeLayout(
   const empMap = new Map(employees.map((e) => [e.name, e]))
 
   // ── With tree data: group-based layout, managers inside boxes ──
-  if (orgTree?.tree) {
+  if (orgTree?.tree && orgTree.tree.length > 0) {
     const depts = gatherDepts(orgTree.tree)
     const deptByPath = new Map(depts.map((d) => [d.path, d]))
 
@@ -303,6 +332,14 @@ function buildTreeLayout(
   g.setGraph({ rankdir: "TB", nodesep: 50, ranksep: 100, marginx: 40, marginy: 40 })
   for (const id of allIds) g.setNode(id, { width: NODE_W, height: NODE_H })
   for (const [s, t] of hierEdges) if (empMap.has(s) && empMap.has(t)) g.setEdge(s, t)
+  // Ensure employees with no department still get connected to the executive
+  if (executive) {
+    for (const emp of employees) {
+      if (emp.rank !== "executive" && !emp.department) {
+        g.setEdge(executive.name, emp.name)
+      }
+    }
+  }
   dagre.layout(g)
 
   const nodes: Node[] = allIds
@@ -371,23 +408,47 @@ function inferFlatEdges(
 // ── Component ──────────────────────────────────────────────────
 
 export function OrgMap({ employees, selectedName, onNodeClick, orgTree }: OrgMapProps) {
-  const { nodes: initialNodes, edges: initialEdges } = buildTreeLayout(
-    employees,
-    selectedName,
-    orgTree,
-  )
+  const positions = useRef<Record<string, { x: number; y: number }>>(loadPositions())
+
+  const buildWithPositions = useCallback(() => {
+    const { nodes: n, edges: e } = buildTreeLayout(employees, selectedName, orgTree)
+    return { nodes: applyPositions(n, positions.current), edges: e }
+  }, [employees, selectedName, orgTree])
+
+  const { nodes: initialNodes, edges: initialEdges } = buildWithPositions()
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
+  // Rebuild when employees/tree change, preserving positions
+  const prevEmployeesRef = useRef(employees)
   useEffect(() => {
-    const { nodes: n, edges: e } = buildTreeLayout(
-      employees,
-      selectedName,
-      orgTree,
-    )
+    if (prevEmployeesRef.current === employees) return
+    prevEmployeesRef.current = employees
+    const { nodes: n, edges: e } = buildWithPositions()
     setNodes(n)
     setEdges(e)
-  }, [employees, selectedName, orgTree, setNodes, setEdges])
+  }, [employees, buildWithPositions, setNodes, setEdges])
+
+  // Update edges when selection changes (without resetting positions)
+  useEffect(() => {
+    setEdges(buildTreeLayout(employees, selectedName, orgTree).edges)
+  }, [selectedName]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      onNodesChange(changes)
+      // Persist positions after drag ends
+      const hasDragEnd = changes.some((c) => c.type === "position" && !("dragging" in c && c.dragging))
+      if (hasDragEnd) {
+        setNodes((current) => {
+          savePositions(current)
+          positions.current = loadPositions()
+          return current
+        })
+      }
+    },
+    [onNodesChange, setNodes],
+  )
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -401,12 +462,12 @@ export function OrgMap({ employees, selectedName, onNodeClick, orgTree }: OrgMap
     <ReactFlow
       nodes={nodes}
       edges={edges}
-      onNodesChange={onNodesChange}
+      onNodesChange={handleNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeClick={handleNodeClick}
       nodeTypes={nodeTypes}
       connectionLineType={ConnectionLineType.SmoothStep}
-      fitView
+      fitView={positions.current && Object.keys(positions.current).length === 0}
       fitViewOptions={{ padding: 0.3 }}
       minZoom={0.15}
       maxZoom={2}

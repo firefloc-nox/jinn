@@ -193,13 +193,28 @@ function findEmployeeYamlPath(name: string): string | undefined {
   return search(ORG_DIR);
 }
 
+export type EmployeeUpdates = {
+  displayName?: string;
+  department?: string;
+  rank?: string;
+  engine?: string;
+  model?: string;
+  persona?: string;
+  emoji?: string;
+  effortLevel?: string;
+  alwaysNotify?: boolean;
+  mcp?: boolean | string[];
+  maxCostUsd?: number;
+  cliFlags?: string[];
+};
+
 /**
- * Update an employee's YAML file. Only alwaysNotify can be changed.
+ * Update an employee's YAML file with any supported fields.
  * Returns true on success, false if employee not found.
  */
 export function updateEmployeeYaml(
   name: string,
-  updates: { alwaysNotify?: boolean },
+  updates: EmployeeUpdates,
 ): boolean {
   const filePath = findEmployeeYamlPath(name);
   if (!filePath) return false;
@@ -209,14 +224,98 @@ export function updateEmployeeYaml(
     const data = yaml.load(raw) as Record<string, unknown>;
     if (!data || typeof data !== "object") return false;
 
-    if (typeof updates.alwaysNotify === "boolean") {
-      data.alwaysNotify = updates.alwaysNotify;
+    const fields: (keyof EmployeeUpdates)[] = [
+      "displayName", "department", "rank", "engine", "model",
+      "persona", "emoji", "effortLevel", "alwaysNotify", "mcp",
+      "maxCostUsd", "cliFlags",
+    ];
+    for (const field of fields) {
+      if (updates[field] !== undefined) {
+        data[field] = updates[field] as unknown;
+      }
+    }
+
+    // If department changed, move the file
+    if (updates.department !== undefined && updates.department !== data.department) {
+      const newDeptDir = path.join(ORG_DIR, updates.department);
+      if (!fs.existsSync(newDeptDir)) fs.mkdirSync(newDeptDir, { recursive: true });
+      const newFilePath = path.join(newDeptDir, `${name}.yaml`);
+      fs.writeFileSync(newFilePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
+      fs.unlinkSync(filePath);
+      return true;
     }
 
     fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
     return true;
   } catch (err) {
     logger.warn(`Failed to update employee YAML for ${name}: ${err}`);
+    return false;
+  }
+}
+
+/**
+ * Create a new employee YAML file.
+ * Returns the file path on success, null on failure.
+ */
+export function createEmployeeYaml(data: {
+  name: string;
+  displayName: string;
+  department?: string;
+  rank?: string;
+  engine?: string;
+  model?: string;
+  persona: string;
+  emoji?: string;
+  effortLevel?: string;
+  alwaysNotify?: boolean;
+}): string | null {
+  const slugName = data.name.toLowerCase().replace(/\s+/g, "-");
+  const deptDir = data.department
+    ? path.join(ORG_DIR, data.department)
+    : ORG_DIR;
+
+  if (!fs.existsSync(deptDir)) {
+    fs.mkdirSync(deptDir, { recursive: true });
+  }
+
+  const filePath = path.join(deptDir, `${slugName}.yaml`);
+  if (fs.existsSync(filePath)) return null; // already exists
+
+  try {
+    const yamlData: Record<string, unknown> = {
+      name: slugName,
+      displayName: data.displayName,
+      rank: data.rank || "employee",
+      engine: data.engine || "claude",
+      persona: data.persona,
+    };
+    if (data.department) yamlData.department = data.department;
+    if (data.model) yamlData.model = data.model;
+    if (data.emoji) yamlData.emoji = data.emoji;
+    if (data.effortLevel) yamlData.effortLevel = data.effortLevel;
+    if (typeof data.alwaysNotify === "boolean") yamlData.alwaysNotify = data.alwaysNotify;
+
+    fs.writeFileSync(filePath, yaml.dump(yamlData, { lineWidth: -1 }), "utf-8");
+    return filePath;
+  } catch (err) {
+    logger.warn(`Failed to create employee YAML for ${slugName}: ${err}`);
+    return null;
+  }
+}
+
+/**
+ * Delete an employee's YAML file.
+ * Returns true on success, false if not found.
+ */
+export function deleteEmployeeYaml(name: string): boolean {
+  const filePath = findEmployeeYamlPath(name);
+  if (!filePath) return false;
+
+  try {
+    fs.unlinkSync(filePath);
+    return true;
+  } catch (err) {
+    logger.warn(`Failed to delete employee YAML for ${name}: ${err}`);
     return false;
   }
 }
