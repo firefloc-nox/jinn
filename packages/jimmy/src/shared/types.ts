@@ -369,4 +369,12 @@ export interface JinnConfig {
     languages?: string[];
   };
   remotes?: Record<string, { url: string; label?: string }>;
+  kanban?: {
+    columns?: Array<{ id: string; title: string }>;
+  };
+  activity?: {
+    maxEventsPerSession?: number;
+    maxEventsGlobal?: number;
+    retentionDays?: number;
+  };
 }

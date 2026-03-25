@@ -12,6 +12,7 @@ import { initDb, recoverStaleSessions, recoverStaleQueueItems, getInterruptedSes
 import { SessionManager, type RouteOptions } from "../sessions/manager.js";
 import { ClaudeEngine } from "../engines/claude.js";
 import { CodexEngine } from "../engines/codex.js";
+import { LocalEngine } from "../engines/local.js";
 import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
 import { ensureFilesDir } from "./files.js";
 import { initStt } from "../stt/stt.js";
@@ -474,6 +475,16 @@ export async function startGateway(
       try {
         currentConfig = loadConfig();
         apiContext.config = currentConfig;
+
+        // Hot-reload local engine registration
+        if (currentConfig.engines?.local?.url) {
+          const localEngine = new LocalEngine(currentConfig.engines.local);
+          engines.set("local", localEngine);
+          logger.info(`Local engine reloaded: ${currentConfig.engines.local.model} @ ${currentConfig.engines.local.url}`);
+        } else {
+          engines.delete("local");
+        }
+
         logger.info("Config reloaded successfully");
         emit("config:reloaded", {});
       } catch (err) {
