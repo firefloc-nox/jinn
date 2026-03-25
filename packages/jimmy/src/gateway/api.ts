@@ -14,7 +14,6 @@ import {
   getSession,
   createSession,
   updateSession,
-  UpdateSessionFields,
   deleteSession,
   deleteSessions,
   insertMessage,
@@ -24,12 +23,6 @@ import {
   getQueueItems,
   cancelAllPendingQueueItems,
   listAllPendingQueueItems,
-  getFile,
-  insertSessionEvent,
-  getSessionEvents,
-  trimSessionEvents,
-  trimGlobalEvents,
-  purgeOldEvents,
 } from "../sessions/registry.js";
 import {
   CONFIG_PATH,
@@ -39,10 +32,8 @@ import {
   SKILLS_DIR,
   LOGS_DIR,
   TMP_DIR,
-  FILES_DIR,
 } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
-import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
 import { getSttStatus, downloadModel, transcribe as sttTranscribe, resolveLanguages, WHISPER_LANGUAGES } from "../stt/stt.js";
 import { JINN_HOME } from "../shared/paths.js";
 import { resolveEffort } from "../shared/effort.js";
@@ -56,7 +47,6 @@ import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
 import { loadInstances } from "../cli/instances.js";
-import { buildRoutePath, resolveManagerChain } from "./services.js";
 
 export interface ApiContext {
   config: JinnConfig;
@@ -65,38 +55,6 @@ export interface ApiContext {
   getConfig: () => JinnConfig;
   emit: (event: string, payload: unknown) => void;
   connectors: Map<string, import("../shared/types.js").Connector>;
-  reloadConnectorInstances?: () => Promise<{ started: string[]; stopped: string[]; errors: string[] }>;
-}
-
-/** Insert a session event and enforce configured activity limits.
- *  Same signature as insertSessionEvent — reads limits from activityLimits. */
-let activityLimits: { maxEventsPerSession: number; maxEventsGlobal: number; retentionDays: number } = {
-  maxEventsPerSession: 0, maxEventsGlobal: 0, retentionDays: 0,
-};
-
-export function setActivityLimits(config: JinnConfig): void {
-  const activity = (config as unknown as Record<string, unknown>).activity as
-    | { maxEventsPerSession?: number; maxEventsGlobal?: number; retentionDays?: number }
-    | undefined;
-  activityLimits = {
-    maxEventsPerSession: activity?.maxEventsPerSession || 0,
-    maxEventsGlobal: activity?.maxEventsGlobal || 0,
-    retentionDays: activity?.retentionDays || 0,
-  };
-}
-
-function insertAndTrimEvent(event: Parameters<typeof insertSessionEvent>[0]): void {
-  insertSessionEvent(event);
-  if (activityLimits.maxEventsPerSession) {
-    trimSessionEvents(event.sessionId, activityLimits.maxEventsPerSession);
-  }
-  // Global/retention trim runs probabilistically to avoid overhead
-  if (activityLimits.maxEventsGlobal && Math.random() < 0.02) {
-    trimGlobalEvents(activityLimits.maxEventsGlobal);
-  }
-  if (activityLimits.retentionDays && Math.random() < 0.01) {
-    purgeOldEvents(activityLimits.retentionDays);
-  }
 }
 
 export function resumePendingWebQueueItems(context: ApiContext): void {
@@ -182,12 +140,12 @@ function dispatchWebSessionRun(
   engine: Engine,
   config: JinnConfig,
   context: ApiContext,
-  opts?: { delayMs?: number; queueItemId?: string; attachments?: string[] },
+  opts?: { delayMs?: number; queueItemId?: string },
 ): void {
   const run = async () => {
     await context.sessionManager.getQueue().enqueue(session.sessionKey || session.sourceRef, async () => {
       context.emit("session:started", { sessionId: session.id });
-      await runWebSession(session, prompt, engine, config, context, opts?.attachments);
+      await runWebSession(session, prompt, engine, config, context);
     }, opts?.queueItemId);
   };
 
@@ -243,29 +201,6 @@ async function readJsonBody(req: HttpRequest, res: ServerResponse): Promise<{ ok
   }
 }
 
-/** Resolve an array of file IDs to local filesystem paths for engine consumption. */
-function resolveAttachmentPaths(fileIds: unknown): string[] {
-  if (!Array.isArray(fileIds)) return [];
-  const paths: string[] = [];
-  for (const id of fileIds) {
-    if (typeof id !== "string" || !id.trim()) continue;
-    const meta = getFile(id);
-    if (!meta) {
-      logger.warn(`Attachment file not found: ${id}`);
-      continue;
-    }
-    const filePath = path.join(FILES_DIR, meta.id, meta.filename);
-    if (fs.existsSync(filePath)) {
-      paths.push(filePath);
-    } else if (meta.path && fs.existsSync(meta.path)) {
-      paths.push(meta.path);
-    } else {
-      logger.warn(`Attachment file missing on disk: ${id} (${meta.filename})`);
-    }
-  }
-  return paths;
-}
-
 function json(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
@@ -283,33 +218,12 @@ function serverError(res: ServerResponse, message: string): void {
   json(res, { error: message }, 500);
 }
 
-const SANITIZED_KEYS = new Set(["token", "botToken", "signingSecret", "appToken"]);
-
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target };
   for (const key of Object.keys(source)) {
     const sv = source[key];
     const tv = target[key];
-    // Skip sanitized secret placeholders — keep original value
-    if (SANITIZED_KEYS.has(key) && sv === "***") continue;
-    if (Array.isArray(sv)) {
-      // For arrays (e.g. instances), preserve secrets from matching items
-      if (Array.isArray(tv)) {
-        result[key] = sv.map((item: unknown) => {
-          if (item && typeof item === "object" && !Array.isArray(item)) {
-            const srcItem = item as Record<string, unknown>;
-            // Find matching target item by id
-            const matchTarget = (tv as unknown[]).find(
-              (t) => t && typeof t === "object" && (t as Record<string, unknown>).id === srcItem.id
-            ) as Record<string, unknown> | undefined;
-            if (matchTarget) return deepMerge(matchTarget, srcItem);
-          }
-          return item;
-        });
-      } else {
-        result[key] = sv;
-      }
-    } else if (sv && typeof sv === "object" && !Array.isArray(sv) && tv && typeof tv === "object" && !Array.isArray(tv)) {
+    if (sv && typeof sv === "object" && !Array.isArray(sv) && tv && typeof tv === "object" && !Array.isArray(tv)) {
       result[key] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>);
     } else {
       result[key] = sv;
@@ -386,8 +300,6 @@ export async function handleApiRequest(
           default: config.engines.default,
           claude: { model: config.engines.claude.model, available: true },
           codex: { model: config.engines.codex.model, available: true },
-          ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
-          ...(config.engines.local ? { local: { model: config.engines.local.model, url: config.engines.local.url, available: true } } : {}),
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
@@ -440,45 +352,7 @@ export async function handleApiRequest(
         }
       }
 
-      // Support ?last=N to return only the N most recent messages
-      const lastN = parseInt(url.searchParams.get("last") || "0", 10);
-      if (lastN > 0 && messages.length > lastN) {
-        messages = messages.slice(-lastN);
-      }
-
       return json(res, { ...serializeSession(session, context), messages });
-    }
-
-    // PUT /api/sessions/:id
-    params = matchRoute("/api/sessions/:id", pathname);
-    if (method === "PUT" && params) {
-      const session = getSession(params.id);
-      if (!session) return notFound(res);
-      const _parsed = await readJsonBody(req, res);
-      if (!_parsed.ok) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const body = _parsed.body as any;
-      const updates: UpdateSessionFields = {};
-      if (body.title !== undefined) {
-        if (typeof body.title !== "string") return badRequest(res, "title must be a string");
-        const trimmed = body.title.trim();
-        if (!trimmed) return badRequest(res, "title must not be empty");
-        updates.title = trimmed.slice(0, 200);
-      }
-      if (Object.keys(updates).length === 0) return badRequest(res, "no valid fields to update");
-      const updated = updateSession(params.id, updates);
-      if (!updated) return notFound(res);
-      context.emit("session:updated", { sessionId: params.id });
-      return json(res, serializeSession(updated, context));
-    }
-
-    // GET /api/sessions/:id/events
-    params = matchRoute("/api/sessions/:id/events", pathname);
-    if (method === "GET" && params) {
-      const session = getSession(params.id);
-      if (!session) return notFound(res);
-      const events = getSessionEvents(params.id);
-      return json(res, { sessionId: params.id, events });
     }
 
     // DELETE /api/sessions/:id
@@ -514,31 +388,6 @@ export async function handleApiRequest(
       updateSession(params.id, { status: "idle", lastActivity: new Date().toISOString(), lastError: null });
       context.emit("session:stopped", { sessionId: params.id });
       return json(res, { status: "stopped", sessionId: params.id });
-    }
-
-    // POST /api/sessions/:id/reset — clear stuck session state (stale engine IDs, errors)
-    params = matchRoute("/api/sessions/:id/reset", pathname);
-    if (method === "POST" && params) {
-      const session = getSession(params.id);
-      if (!session) return notFound(res);
-      const engine = context.sessionManager.getEngine(session.engine);
-      if (engine && isInterruptibleEngine(engine) && engine.isAlive(params.id)) {
-        engine.kill(params.id, "Interrupted by reset");
-      }
-      context.sessionManager.getQueue().clearQueue(session.sessionKey || session.sourceRef || session.id);
-      const meta = { ...(session.transportMeta || {}) } as Record<string, unknown>;
-      delete meta["engineSessions"];
-      delete meta["engineOverride"];
-      updateSession(params.id, {
-        status: "idle",
-        engineSessionId: null,
-        lastActivity: new Date().toISOString(),
-        lastError: null,
-        transportMeta: meta as any,
-      });
-      logger.info(`Session ${params.id} reset via API (cleared engineSessions, engineOverride, engineSessionId, lastError)`);
-      context.emit("session:updated", { sessionId: params.id });
-      return json(res, { status: "reset", sessionId: params.id });
     }
 
     // DELETE /api/sessions/:id/queue/:itemId — cancel specific item
@@ -679,22 +528,10 @@ export async function handleApiRequest(
       const prompt = body.prompt || body.message;
       if (!prompt) return badRequest(res, "prompt or message is required");
       const config = context.getConfig();
-      // Resolve employee engine/model if specified
-      let engineName = body.engine || config.engines.default;
-      let modelName = body.model || undefined;
-      if (body.employee) {
-        const { scanOrg } = await import("./org.js");
-        const emps = scanOrg();
-        const emp = emps.get(body.employee);
-        if (emp) {
-          engineName = body.engine || emp.engine || config.engines.default;
-          modelName = body.model || emp.model || undefined;
-        }
-      }
+      const engineName = body.engine || config.engines.default;
       const sessionKey = `web:${Date.now()}`;
       const session = createSession({
         engine: engineName,
-        model: modelName,
         source: "web",
         sourceRef: sessionKey,
         connector: "web",
@@ -728,80 +565,13 @@ export async function handleApiRequest(
       });
       session.status = "running";
 
-      const attachmentPaths = resolveAttachmentPaths(body.attachments);
-
       const queueSessionKey = session.sessionKey || session.sourceRef || session.id;
       const queueItemId = enqueueQueueItem(session.id, queueSessionKey, prompt);
       context.emit("queue:updated", { sessionId: session.id, sessionKey: queueSessionKey });
 
-      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId, attachments: attachmentPaths.length > 0 ? attachmentPaths : undefined });
+      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId });
 
       return json(res, serializeSession(session, context), 201);
-    }
-
-    // POST /api/sessions/:id/memory-search — search knowledge base
-    // Used by local models and other engines without direct MCP access
-    params = matchRoute("/api/sessions/:id/memory-search", pathname);
-    if (method === "POST" && params) {
-      const session = getSession(params.id);
-      if (!session) return notFound(res);
-      const _parsed = await readJsonBody(req, res);
-      if (!_parsed.ok) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const body = _parsed.body as any;
-      const query = body.query || "";
-      if (!query) return badRequest(res, "query is required");
-      // Sanitize query: limit length and normalize for safe matching
-      const safeQuery = String(query).slice(0, 200).toLowerCase();
-
-      // List knowledge files that match the query (case-insensitive)
-      const knowledgeDir = path.join(JINN_HOME, "knowledge");
-      const docsDir = path.join(JINN_HOME, "docs");
-      const realKnowledge = fs.existsSync(knowledgeDir) ? fs.realpathSync(knowledgeDir) : knowledgeDir;
-      const realDocs = fs.existsSync(docsDir) ? fs.realpathSync(docsDir) : docsDir;
-      const results = [];
-      const MAX_FILES_SCANNED = 50;
-      let filesScanned = 0;
-
-      for (const dir of [knowledgeDir, docsDir]) {
-        if (!fs.existsSync(dir)) continue;
-        const files = fs.readdirSync(dir);
-        for (const file of files) {
-          if (filesScanned >= MAX_FILES_SCANNED) break;
-          if (!file.endsWith(".md")) continue;
-          filesScanned++;
-          const filePath = path.join(dir, file);
-          // Resolve symlinks and verify the real path stays within allowed dirs
-          let realPath: string;
-          try {
-            realPath = fs.realpathSync(filePath);
-          } catch {
-            continue; // broken symlink — skip
-          }
-          if (!realPath.startsWith(realKnowledge + path.sep) && !realPath.startsWith(realDocs + path.sep)) {
-            continue; // symlink escapes allowed directories — skip
-          }
-          // Simple keyword matching
-          const fileLower = file.toLowerCase();
-          if (fileLower.includes(safeQuery) ||
-              fileLower.replace(/-|_/g, " ").includes(safeQuery)) {
-            const stat = fs.statSync(realPath);
-            results.push({
-              name: file,
-              path: filePath.replace(JINN_HOME, "~/.jinn"),
-              dir: dir === knowledgeDir ? "knowledge" : "docs",
-              size: stat.size,
-            });
-          }
-        }
-        if (filesScanned >= MAX_FILES_SCANNED) break;
-      }
-
-      return json(res, {
-        query,
-        results: results.slice(0, 10), // Limit to 10 results
-        hint: "Use 'cat <path>' or read the file with: fetch(gateway_url + '/api/files/<encoded_path>')",
-      });
     }
 
     // POST /api/sessions/:id/message
@@ -822,19 +592,6 @@ export async function handleApiRequest(
       const isNotification = messageRole === "notification";
 
       const config = context.getConfig();
-
-      // If this is a stub session (no engine session yet), re-resolve the engine
-      // from the current default — the user may have changed it since the stub was created.
-      if (!session.engineSessionId && session.engine !== config.engines.default) {
-        const newDefault = config.engines.default;
-        const oldEngine = session.engine;
-        if (context.sessionManager.getEngine(newDefault)) {
-          updateSession(session.id, { engine: newDefault } as any);
-          session = { ...session, engine: newDefault };
-          logger.info(`Stub session ${session.id}: engine updated from ${oldEngine} to ${newDefault} (config changed)`);
-        }
-      }
-
       const engine = context.sessionManager.getEngine(session.engine);
       if (!engine) return serverError(res, `Engine "${session.engine}" not available`);
 
@@ -887,13 +644,11 @@ export async function handleApiRequest(
       // Clear any pending cancellation so the new message runs normally.
       context.sessionManager.getQueue().clearCancelled(session.sessionKey || session.sourceRef || session.id);
 
-      const attachmentPaths = resolveAttachmentPaths(body.attachments);
-
       const sessionKey = session.sessionKey || session.sourceRef || session.id;
       const queueItemId = enqueueQueueItem(session.id, sessionKey, prompt);
       context.emit("queue:updated", { sessionId: session.id, sessionKey });
 
-      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId, attachments: attachmentPaths.length > 0 ? attachmentPaths : undefined });
+      dispatchWebSessionRun(session, prompt, engine, config, context, { queueItemId });
 
       return json(res, { status: "queued", sessionId: session.id });
     }
@@ -1008,239 +763,85 @@ export async function handleApiRequest(
 
     // GET /api/org
     if (method === "GET" && pathname === "/api/org") {
-      const { scanOrgFull } = await import("./org.js");
-      const { employees: empMap, departments: deptMap } = scanOrgFull();
-      const departments = Array.from(deptMap.keys()); // paths like "nexamon-studio/design"
-      const employees = Array.from(empMap.keys());
-      return json(res, { departments, employees });
-    }
-
-    // GET /api/org/tree — nested org hierarchy
-    if (method === "GET" && pathname === "/api/org/tree") {
-      const { scanOrgFull } = await import("./org.js");
-      const { employees: empMap, departments: deptMap } = scanOrgFull();
-
-      interface DeptNode {
-        name: string;
-        displayName: string;
-        description?: string;
-        path: string;
-        manager?: { name: string; displayName: string; rank: string } | null;
-        employees: { name: string; displayName: string; rank: string }[];
-        children: DeptNode[];
-      }
-
-      function buildNode(deptPath: string): DeptNode | null {
-        const dept = deptMap.get(deptPath);
-        if (!dept) return null;
-
-        const managerEmp = dept.manager ? empMap.get(dept.manager) : undefined;
-        const node: DeptNode = {
-          name: dept.name,
-          displayName: dept.displayName,
-          description: dept.description,
-          path: dept.path,
-          manager: managerEmp
-            ? { name: managerEmp.name, displayName: managerEmp.displayName, rank: managerEmp.rank }
-            : dept.manager ? { name: dept.manager, displayName: dept.manager, rank: "unknown" } : null,
-          employees: dept.employees
-            .filter((eName) => eName !== dept.manager) // manager listed separately
-            .map((eName) => {
-              const emp = empMap.get(eName);
-              return emp
-                ? { name: emp.name, displayName: emp.displayName, rank: emp.rank }
-                : { name: eName, displayName: eName, rank: "unknown" };
-            }),
-          children: dept.children
-            .map((childPath) => buildNode(childPath))
-            .filter((n): n is DeptNode => n !== null),
-        };
-        return node;
-      }
-
-      // Root departments: those with no parent
-      const roots: DeptNode[] = [];
-      for (const [deptPath, dept] of deptMap) {
-        if (!dept.parent || !deptMap.has(dept.parent)) {
-          const node = buildNode(deptPath);
-          if (node) roots.push(node);
+      if (!fs.existsSync(ORG_DIR)) return json(res, { departments: [], employees: [] });
+      const entries = fs.readdirSync(ORG_DIR, { withFileTypes: true });
+      const departments = entries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+      const employees: string[] = [];
+      // Scan root-level YAML files
+      for (const e of entries) {
+        if (e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml"))) {
+          employees.push(e.name.replace(/\.ya?ml$/, ""));
         }
       }
-
-      // Also include unassigned employees (orgPath undefined or not matching any dept)
-      const assignedEmployees = new Set<string>();
-      for (const dept of deptMap.values()) {
-        for (const eName of dept.employees) assignedEmployees.add(eName);
+      // Scan employees/ subdirectory
+      const employeesDir = path.join(ORG_DIR, "employees");
+      if (fs.existsSync(employeesDir)) {
+        const empEntries = fs.readdirSync(employeesDir, { withFileTypes: true });
+        for (const e of empEntries) {
+          if (e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml"))) {
+            employees.push(e.name.replace(/\.ya?ml$/, ""));
+          }
+        }
       }
-      const unassigned = Array.from(empMap.values())
-        .filter((emp) => !assignedEmployees.has(emp.name))
-        .map((emp) => ({ name: emp.name, displayName: emp.displayName, rank: emp.rank }));
-
-      return json(res, { tree: roots, unassigned });
-    }
-
-    // GET /api/org/services — list all cross-department services
-    if (method === "GET" && pathname === "/api/org/services") {
-      const { scanOrgFull } = await import("./org.js");
-      const { departments, services } = scanOrgFull();
-      const result = Array.from(services).map(([svcName, deptPath]) => {
-        const dept = departments.get(deptPath);
-        return {
-          name: svcName,
-          department: {
-            path: deptPath,
-            displayName: dept?.displayName || deptPath,
-            manager: dept?.manager || null,
-          },
-        };
-      });
-      return json(res, { services: result });
-    }
-
-    // POST /api/org/cross-request — create a cross-service request
-    if (method === "POST" && pathname === "/api/org/cross-request") {
-      const parsed = await readJsonBody(req, res);
-      if (!parsed.ok) return;
-      const body = parsed.body as any;
-      const { fromEmployee, service, prompt, parentSessionId } = body;
-      if (!fromEmployee || !service || !prompt) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Missing required fields: fromEmployee, service, prompt" }));
-        return;
+      // Scan inside each department directory for YAML files (excluding department.yaml)
+      for (const dept of departments) {
+        const deptDir = path.join(ORG_DIR, dept);
+        const deptEntries = fs.readdirSync(deptDir, { withFileTypes: true });
+        for (const e of deptEntries) {
+          if (e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml")) && e.name !== "department.yaml") {
+            employees.push(e.name.replace(/\.ya?ml$/, ""));
+          }
+        }
       }
-
-      const { scanOrgFull } = await import("./org.js");
-      const { employees: empMap, departments, services } = scanOrgFull();
-
-      const requester = empMap.get(fromEmployee);
-      if (!requester) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: `Employee "${fromEmployee}" not found` }));
-        return;
-      }
-
-      const targetDeptPath = services.get(service);
-      if (!targetDeptPath) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          error: `Service "${service}" not found`,
-        }));
-        return;
-      }
-
-      const targetDept = departments.get(targetDeptPath);
-      if (!targetDept?.manager) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: `Target department "${targetDeptPath}" has no manager` }));
-        return;
-      }
-
-      // Build the route path and manager chain
-      const fromDept = requester.orgPath || "";
-      const routePath = buildRoutePath(fromDept, targetDeptPath, departments);
-      const managerChain = resolveManagerChain(routePath, departments, empMap);
-
-      // Create a session targeting the target department's manager
-      const crossBrief = `## Cross-service request
-
-**From**: ${requester.displayName} (${requester.department})
-**Service requested**: ${service}
-**Routing**: ${routePath.map(p => departments.get(p)?.displayName || p).join(" → ")}
-
-### Request
-${prompt}
-
----
-Handle this request as a priority task from your chain of command. Assign it to the most appropriate team member and deliver the result.`;
-
-      // Use the target manager's configured engine, falling back to default
-      const targetManager = empMap.get(targetDept.manager);
-      const targetEngine = targetManager?.engine || context.config.engines.default || "claude";
-
-      const session = createSession({
-        prompt: crossBrief,
-        engine: targetEngine,
-        source: "cross-request",
-        sourceRef: `cross:${fromEmployee}:${service}`,
-        employee: targetDept.manager,
-        parentSessionId: parentSessionId || undefined,
-        title: `Cross-request: ${fromEmployee} → ${service}`,
-      });
-      const sessionId = session.id;
-
-      return json(res, {
-        sessionId,
-        route: routePath,
-        managers: managerChain.map(m => ({ name: m.name, displayName: m.displayName, department: m.department })),
-        targetDepartment: targetDeptPath,
-        targetManager: targetDept.manager,
-        service,
-      });
+      return json(res, { departments, employees });
     }
 
     // GET /api/org/employees/:name
     params = matchRoute("/api/org/employees/:name", pathname);
     if (method === "GET" && params) {
-      // Recursive search for employee YAML at any depth
-      const findEmployeeFile = (dir: string, name: string): string | null => {
-        if (!fs.existsSync(dir)) return null;
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isFile() && (entry.name === `${name}.yaml` || entry.name === `${name}.yml`) && entry.name !== "department.yaml") {
-            return fullPath;
-          }
-          if (entry.isDirectory()) {
-            const found = findEmployeeFile(fullPath, name);
-            if (found) return found;
-          }
+      const candidates = [
+        path.join(ORG_DIR, "employees", `${params.name}.yaml`),
+        path.join(ORG_DIR, "employees", `${params.name}.yml`),
+        path.join(ORG_DIR, `${params.name}.yaml`),
+        path.join(ORG_DIR, `${params.name}.yml`),
+      ];
+      // Also search inside each department directory
+      if (fs.existsSync(ORG_DIR)) {
+        const dirs = fs.readdirSync(ORG_DIR, { withFileTypes: true }).filter((e) => e.isDirectory());
+        for (const dir of dirs) {
+          candidates.push(path.join(ORG_DIR, dir.name, `${params.name}.yaml`));
+          candidates.push(path.join(ORG_DIR, dir.name, `${params.name}.yml`));
         }
-        return null;
-      };
-      const filePath = findEmployeeFile(ORG_DIR, params.name);
+      }
+      const filePath = candidates.find((c) => fs.existsSync(c));
       if (!filePath) return notFound(res);
       const content = yaml.load(fs.readFileSync(filePath, "utf-8"));
       return json(res, content);
     }
 
-    // PATCH /api/org/employees/:name — update employee fields (currently only alwaysNotify)
-    params = matchRoute("/api/org/employees/:name", pathname);
-    if (method === "PATCH" && params) {
-      const _parsed = await readJsonBody(req, res);
-      if (!_parsed.ok) return;
-      const body = _parsed.body as any;
-      const { updateEmployeeYaml } = await import("./org.js");
-      const updated = updateEmployeeYaml(params.name, {
-        alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
-      });
-      if (!updated) return notFound(res);
-      context.emit("org:updated", { employee: params.name });
-      return json(res, { status: "ok" });
-    }
-
-    // GET /api/org/departments/*/board — supports nested paths like nexamon-studio/design
-    if (method === "GET" && pathname.startsWith("/api/org/departments/") && pathname.endsWith("/board")) {
-      const deptPath = pathname.slice("/api/org/departments/".length, -"/board".length);
-      const resolved = path.resolve(path.join(ORG_DIR, deptPath, "board.json"));
-      if (!resolved.startsWith(path.resolve(ORG_DIR) + path.sep)) return badRequest(res, "Invalid path");
-      const boardPath = resolved;
+    // GET /api/org/departments/:name/board
+    params = matchRoute("/api/org/departments/:name/board", pathname);
+    if (method === "GET" && params) {
+      const boardPath = path.join(ORG_DIR, params.name, "board.json");
       if (!fs.existsSync(boardPath)) return notFound(res);
       const board = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
       return json(res, board);
     }
 
-    // PUT /api/org/departments/*/board — supports nested paths
-    if (method === "PUT" && pathname.startsWith("/api/org/departments/") && pathname.endsWith("/board")) {
-      const deptPath = pathname.slice("/api/org/departments/".length, -"/board".length);
-      const deptDir = path.resolve(path.join(ORG_DIR, deptPath));
-      if (!deptDir.startsWith(path.resolve(ORG_DIR) + path.sep)) return badRequest(res, "Invalid path");
+    // PUT /api/org/departments/:name/board
+    if (method === "PUT" && matchRoute("/api/org/departments/:name/board", pathname)) {
+      const p = matchRoute("/api/org/departments/:name/board", pathname)!;
+      const boardPath = path.join(ORG_DIR, p.name, "board.json");
+      const deptDir = path.join(ORG_DIR, p.name);
       if (!fs.existsSync(deptDir)) return notFound(res);
       const _parsed = await readJsonBody(req, res);
       if (!_parsed.ok) return;
-      const body = _parsed.body as Record<string, unknown>;
-      const boardPath = path.join(deptDir, "board.json");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const body = _parsed.body as any;
       fs.writeFileSync(boardPath, JSON.stringify(body, null, 2));
-      context.emit("board:updated", { department: deptPath });
+      context.emit("board:updated", { department: p.name });
       return json(res, { status: "ok" });
     }
 
@@ -1374,57 +975,24 @@ Handle this request as a priority task from your chain of command. Assign it to 
       return json(res, { status: "removed", name: params.name });
     }
 
-    // GET /api/engines/local/models — proxy to local engine's /v1/models
-    if (method === "GET" && pathname === "/api/engines/local/models") {
-      const config = context.getConfig();
-      const localUrl = config.engines?.local?.url;
-      if (!localUrl) {
-        return json(res, { error: "Local engine not configured" }, 400);
-      }
-      try {
-        const upstream = await fetch(`${localUrl.replace(/\/+$/, "")}/v1/models`);
-        if (!upstream.ok) {
-          const body = await upstream.text().catch(() => "");
-          return json(res, { error: `Upstream ${upstream.status}: ${body}` }, upstream.status);
-        }
-        const data = await upstream.json();
-        return json(res, data);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return json(res, { error: `Connection failed: ${msg}` }, 502);
-      }
-    }
-
     // GET /api/config
     if (method === "GET" && pathname === "/api/config") {
       const config = context.getConfig();
       // Sanitize: remove any secrets/tokens from connectors
-      const rawConnectors = config.connectors || {};
-      const sanitizedConnectors: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(rawConnectors)) {
-        if (k === "instances" && Array.isArray(v)) {
-          sanitizedConnectors.instances = v.map((inst: any) => ({
-            ...inst,
-            token: inst?.token ? "***" : undefined,
-            signingSecret: inst?.signingSecret ? "***" : undefined,
-            botToken: inst?.botToken ? "***" : undefined,
-            appToken: inst?.appToken ? "***" : undefined,
-          }));
-        } else if (v && typeof v === "object") {
-          sanitizedConnectors[k] = {
-            ...v,
-            token: (v as any)?.token ? "***" : undefined,
-            signingSecret: (v as any)?.signingSecret ? "***" : undefined,
-            botToken: (v as any)?.botToken ? "***" : undefined,
-            appToken: (v as any)?.appToken ? "***" : undefined,
-          };
-        } else {
-          sanitizedConnectors[k] = v;
-        }
-      }
       const sanitized = {
         ...config,
-        connectors: sanitizedConnectors,
+        connectors: Object.fromEntries(
+          Object.entries(config.connectors || {}).map(([k, v]) => [
+            k,
+            {
+              ...v,
+              token: v?.token ? "***" : undefined,
+              signingSecret: v?.signingSecret ? "***" : undefined,
+              botToken: v?.botToken ? "***" : undefined,
+              appToken: v?.appToken ? "***" : undefined,
+            },
+          ]),
+        ),
       };
       return json(res, sanitized);
     }
@@ -1456,8 +1024,6 @@ Handle this request as a priority task from your chain of command. Assign it to 
         "stt",
         "skills",
         "remotes",
-        "kanban",
-        "activity",
       ];
       const unknownKeys = Object.keys(body).filter((k) => !KNOWN_KEYS.includes(k));
       if (unknownKeys.length > 0) {
@@ -1504,20 +1070,6 @@ Handle this request as a priority task from your chain of command. Assign it to 
       const allLines = buf.toString("utf-8").split("\n").filter(Boolean);
       const lines = allLines.slice(-n);
       return json(res, { lines });
-    }
-
-    // POST /api/connectors/reload — stop all instance connectors and restart from config
-    if (method === "POST" && pathname === "/api/connectors/reload") {
-      if (!context.reloadConnectorInstances) {
-        return json(res, { error: "Connector reload not available" }, 501);
-      }
-      try {
-        const result = await context.reloadConnectorInstances();
-        context.emit("connectors:reloaded", result);
-        return json(res, result);
-      } catch (err) {
-        return json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
     }
 
     // POST /api/connectors/:id/incoming — receive proxied Discord messages from primary instance
@@ -1655,7 +1207,7 @@ Handle this request as a priority task from your chain of command. Assign it to 
         name: connector.name,
         instanceId,
         // Include employee binding if the connector exposes it
-        employee: connector.getEmployee?.() ?? undefined,
+        employee: (connector as any).config?.employee ?? undefined,
         ...connector.getHealth(),
       }));
       return json(res, connectors);
@@ -1690,10 +1242,8 @@ Handle this request as a priority task from your chain of command. Assign it to 
           (f) => String(f).endsWith(".yaml") && !String(f).endsWith("department.yaml")
         );
       const config = context.getConfig();
-      const onboarded = config.portal?.onboarded === true;
       return json(res, {
-        needed: !onboarded && sessions.length === 0 && !hasEmployees,
-        onboarded,
+        needed: sessions.length === 0 && !hasEmployees,
         sessionsCount: sessions.length,
         hasEmployees,
         portalName: config.portal?.portalName ?? null,
@@ -1715,7 +1265,6 @@ Handle this request as a priority task from your chain of command. Assign it to 
         ...config,
         portal: {
           ...config.portal,
-          onboarded: true,
           ...(portalName !== undefined && { portalName: portalName || undefined }),
           ...(operatorName !== undefined && { operatorName: operatorName || undefined }),
           ...(language !== undefined && { language: language || undefined }),
@@ -2194,7 +1743,6 @@ async function runWebSession(
   engine: Engine,
   config: JinnConfig,
   context: ApiContext,
-  attachments?: string[],
 ): Promise<void> {
   const currentSession = getSession(session.id);
   if (!currentSession) {
@@ -2212,17 +1760,15 @@ async function runWebSession(
     });
   }
 
-  // If this session has an assigned employee, load their persona
-  let employee: import("../shared/types.js").Employee | undefined;
-  if (currentSession.employee) {
-    const { findEmployee } = await import("./org.js");
-    const { scanOrg } = await import("./org.js");
-    const registry = scanOrg();
-    employee = findEmployee(currentSession.employee, registry);
-  }
-
-  let mcpConfigPath: string | undefined;
   try {
+    // If this session has an assigned employee, load their persona
+    let employee: import("../shared/types.js").Employee | undefined;
+    if (currentSession.employee) {
+      const { findEmployee } = await import("./org.js");
+      const { scanOrg } = await import("./org.js");
+      const registry = scanOrg();
+      employee = findEmployee(currentSession.employee, registry);
+    }
 
     const systemPrompt = buildContext({
       source: "web",
@@ -2232,29 +1778,12 @@ async function runWebSession(
       connectors: Array.from(context.connectors.keys()),
       config,
       sessionId: currentSession.id,
-      engineName: currentSession.engine,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const engineConfig: any = currentSession.engine === "codex"
+    const engineConfig = currentSession.engine === "codex"
       ? config.engines.codex
-      : currentSession.engine === "gemini"
-        ? config.engines.gemini ?? config.engines.claude
-        : currentSession.engine === "local"
-          ? config.engines.local ?? { url: "http://localhost:11434", model: "" }
-          : config.engines.claude;
+      : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
-
-    // Resolve MCP servers for this session
-    if (currentSession.engine === "claude") {
-      const mcpConfig = resolveMcpServers(config.mcp, employee);
-      const mcpServerNames = Object.keys(mcpConfig.mcpServers);
-      logger.info(`MCP resolve for web session ${currentSession.id} (employee: ${employee?.name || "none"}): ${mcpServerNames.length} servers [${mcpServerNames.join(", ")}]`);
-      if (mcpServerNames.length > 0) {
-        mcpConfigPath = writeMcpConfigFile(mcpConfig, currentSession.id);
-        logger.info(`MCP config written to ${mcpConfigPath}`);
-      }
-    }
 
     let lastHeartbeatAt = 0;
     const runHeartbeat = setInterval(() => {
@@ -2264,64 +1793,18 @@ async function runWebSession(
       });
     }, 5000);
 
-    // ── Resolve slash-command skills ────────────────────────────
-    // If the prompt starts with /skillname, inject the SKILL.md content
-    let resolvedPrompt = prompt;
-    const slashMatch = prompt.match(/^\/([a-z][a-z0-9-]*)\s*(.*)?$/s);
-    if (slashMatch) {
-      const skillName = slashMatch[1];
-      const skillArgs = (slashMatch[2] || "").trim();
-      const skillPath = path.join(JINN_HOME, "skills", skillName, "SKILL.md");
-      if (fs.existsSync(skillPath)) {
-        const skillContent = fs.readFileSync(skillPath, "utf-8");
-        resolvedPrompt = `Execute the following skill:\n\n<skill name="${skillName}">\n${skillContent}\n</skill>\n\n${skillArgs ? `Arguments: ${skillArgs}` : "Run the skill now."}`;
-        logger.info(`Resolved slash command /${skillName} → injected SKILL.md (${skillContent.length} chars)`);
-      }
-    }
-
     const syncSinceIso = (currentSession.transportMeta as any)?.claudeSyncSince;
     const syncSinceMs = typeof syncSinceIso === "string" ? new Date(syncSinceIso).getTime() : NaN;
     const syncRequested = currentSession.engine === "claude" && typeof syncSinceIso === "string" && Number.isFinite(syncSinceMs);
-
-    // For local models: inject compressed conversation history into prompt.
-    // Local engines have no native session resumption — each call is stateless.
-    // We include the last N turns so the model has multi-turn context.
-    let promptToRun: string;
-    if (syncRequested) {
-      const sinceMessages = getMessages(currentSession.id)
-        .filter((m) => (m.role === "user" || m.role === "assistant") && m.timestamp >= syncSinceMs)
-        .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
-      const transcript = sinceMessages.slice(-20).join("\n\n");
-      promptToRun = `We temporarily switched to GPT due to a Claude usage limit. Sync your context with this transcript (most recent last), then respond to the last USER message.\n\n${transcript}`;
-    } else if (currentSession.engine === "local") {
-      // Check if this is a multi-turn conversation (has prior messages)
-      const history = getMessages(currentSession.id)
-        .filter((m) => m.role === "user" || m.role === "assistant");
-      // Only include history if there are prior turns (not just the current message)
-      if (history.length > 1) {
-        // Reserve 8000 chars for system prompt + response, give the rest to history
-        const SYSTEM_PROMPT_RESERVE = 8_000;
-        const totalBudget = config.engines?.local?.maxContextChars ?? 12_000;
-        const maxHistoryChars = Math.max(1_000, totalBudget - SYSTEM_PROMPT_RESERVE);
-        const recent = history.slice(-8); // Last 8 messages (4 turns)
-        let historyText = "";
-        for (let i = recent.length - 1; i >= 0; i--) {
-          // Escape XML-like tags in user content to prevent prompt injection
-          const safeContent = recent[i].content
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/\n/g, " ");
-          const entry = `${recent[i].role.toUpperCase()}: ${safeContent}`;
-          if (historyText.length + entry.length > maxHistoryChars) break;
-          historyText = entry + "\n\n" + historyText;
-        }
-        promptToRun = `<conversation_history>\n${historyText.trim()}\n</conversation_history>\n\nRespond to the last USER message above.`;
-      } else {
-        promptToRun = resolvedPrompt;
-      }
-    } else {
-      promptToRun = resolvedPrompt;
-    }
+    const promptToRun = syncRequested
+      ? (() => {
+        const sinceMessages = getMessages(currentSession.id)
+          .filter((m) => (m.role === "user" || m.role === "assistant") && m.timestamp >= syncSinceMs)
+          .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
+        const transcript = sinceMessages.slice(-20).join("\n\n");
+        return `We temporarily switched to GPT due to a Claude usage limit. Sync your context with this transcript (most recent last), then respond to the last USER message.\n\n${transcript}`;
+      })()
+      : prompt;
 
     const result = await engine.run({
       prompt: promptToRun,
@@ -2332,8 +1815,6 @@ async function runWebSession(
       model: currentSession.model ?? engineConfig.model,
       effortLevel,
       cliFlags: employee?.cliFlags,
-      mcpConfigPath,
-      attachments: attachments?.length ? attachments : undefined,
       sessionId: currentSession.id,
       onStream: (delta) => {
         const now = Date.now();
@@ -2350,24 +1831,7 @@ async function runWebSession(
             type: delta.type,
             content: delta.content,
             toolName: delta.toolName,
-            toolArgs: delta.toolArgs,
-            thinkingText: delta.thinkingText,
-            resultContent: delta.resultContent,
-            timestamp: delta.timestamp,
           });
-          // Persist event for replay (skip high-frequency text/text_snapshot deltas)
-          if (delta.type !== "text" && delta.type !== "text_snapshot" && delta.type !== "status") {
-            insertAndTrimEvent({
-              sessionId: currentSession.id,
-              type: delta.type,
-              content: delta.content,
-              toolName: delta.toolName,
-              toolArgs: delta.toolArgs,
-              thinkingText: delta.thinkingText,
-              resultContent: delta.resultContent,
-              timestamp: delta.timestamp ?? Date.now(),
-            });
-          }
         } catch (err) {
           logger.warn(`Failed to emit stream delta for session ${currentSession.id}: ${err instanceof Error ? err.message : err}`);
         }
@@ -2431,22 +1895,19 @@ async function runWebSession(
             `⚠️ Claude usage limit reached. Session ${currentSession.id}${currentSession.employee ? ` (${currentSession.employee})` : ""} switching to GPT.`,
           );
 
-          // Resolve fallback engine config — supports codex and local engines
-          const fallbackConfig = fallbackName === "local" && config.engines.local
-            ? { bin: "", model: config.engines.local.model }
-            : config.engines.codex;
+          const fallbackConfig = config.engines.codex;
           const fallbackEffort = resolveEffort(fallbackConfig, currentSession, employee);
-          const fallbackResume = typeof engineSessions[fallbackName] === "string" ? (engineSessions[fallbackName] as string) : undefined;
+          const codexResume = typeof engineSessions.codex === "string" ? (engineSessions.codex as string) : undefined;
           const history = getMessages(currentSession.id)
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
           const historyText = history.slice(-12).join("\n\n");
-          const fallbackPrompt = fallbackResume
+          const fallbackPrompt = codexResume
             ? prompt
             : `Continue this conversation and respond to the last USER message.\n\nConversation so far:\n\n${historyText}`;
           const fallbackResult = await fallbackEngine.run({
             prompt: fallbackPrompt,
-            resumeSessionId: fallbackResume,
+            resumeSessionId: codexResume,
             systemPrompt,
             cwd: JINN_HOME,
             bin: fallbackConfig.bin,
@@ -2460,23 +1921,7 @@ async function runWebSession(
                 type: delta.type,
                 content: delta.content,
                 toolName: delta.toolName,
-                toolArgs: delta.toolArgs,
-                thinkingText: delta.thinkingText,
-                resultContent: delta.resultContent,
-                timestamp: delta.timestamp,
               });
-              if (delta.type !== "text" && delta.type !== "text_snapshot" && delta.type !== "status") {
-                insertAndTrimEvent({
-                  sessionId: currentSession.id,
-                  type: delta.type,
-                  content: delta.content,
-                  toolName: delta.toolName,
-                  toolArgs: delta.toolArgs,
-                  thinkingText: delta.thinkingText,
-                  resultContent: delta.resultContent,
-                  timestamp: delta.timestamp ?? Date.now(),
-                });
-              }
             },
           });
 
@@ -2484,10 +1929,10 @@ async function runWebSession(
             insertMessage(currentSession.id, "assistant", fallbackResult.result);
           }
 
-          // Persist fallback engine session id so future fallbacks can resume it
+          // Persist Codex thread id so future fallbacks can resume it
           const nextEngineSessions = { ...engineSessions };
           if (fallbackResult.sessionId) {
-            nextEngineSessions[fallbackName] = fallbackResult.sessionId;
+            nextEngineSessions.codex = fallbackResult.sessionId;
           }
           const metaAfter = { ...(getSession(currentSession.id)?.transportMeta || nextMeta) } as Record<string, unknown>;
           metaAfter.engineSessions = nextEngineSessions;
@@ -2500,7 +1945,7 @@ async function runWebSession(
             lastError: fallbackResult.error ?? null,
           });
           if (completedFallback) {
-            notifyParentSession(completedFallback, { result: fallbackResult.result, error: fallbackResult.error ?? null, cost: fallbackResult.cost, durationMs: fallbackResult.durationMs }, { alwaysNotify: employee?.alwaysNotify });
+            notifyParentSession(completedFallback, { result: fallbackResult.result, error: fallbackResult.error ?? null, cost: fallbackResult.cost, durationMs: fallbackResult.durationMs });
           }
 
           context.emit("session:completed", {
@@ -2597,7 +2042,6 @@ async function runWebSession(
             model: current.model ?? engineConfig.model,
             effortLevel,
             cliFlags: employee?.cliFlags,
-            mcpConfigPath,
             sessionId: currentSession.id,
             onStream: (delta) => {
               context.emit("session:delta", {
@@ -2605,23 +2049,7 @@ async function runWebSession(
                 type: delta.type,
                 content: delta.content,
                 toolName: delta.toolName,
-                toolArgs: delta.toolArgs,
-                thinkingText: delta.thinkingText,
-                resultContent: delta.resultContent,
-                timestamp: delta.timestamp,
               });
-              if (delta.type !== "text" && delta.type !== "text_snapshot" && delta.type !== "status") {
-                insertAndTrimEvent({
-                  sessionId: currentSession.id,
-                  type: delta.type,
-                  content: delta.content,
-                  toolName: delta.toolName,
-                  toolArgs: delta.toolArgs,
-                  thinkingText: delta.thinkingText,
-                  resultContent: delta.resultContent,
-                  timestamp: delta.timestamp ?? Date.now(),
-                });
-              }
             },
           });
 
@@ -2664,7 +2092,7 @@ async function runWebSession(
             notifyDiscordChannel(
               `✅ Claude usage limit cleared. Session ${currentSession.id}${currentSession.employee ? ` (${currentSession.employee})` : ""} resumed.`,
             );
-            notifyParentSession(completedAfterRetry, { result: retryResult.result, error: retryResult.error ?? null, cost: retryResult.cost, durationMs: retryResult.durationMs }, { alwaysNotify: employee?.alwaysNotify });
+            notifyParentSession(completedAfterRetry, { result: retryResult.result, error: retryResult.error ?? null, cost: retryResult.cost, durationMs: retryResult.durationMs });
           }
 
           context.emit("session:completed", {
@@ -2691,7 +2119,7 @@ async function runWebSession(
           lastError: "Claude usage limit did not clear in time",
         });
         if (erroredSession) {
-          notifyParentSession(erroredSession, { error: "Claude usage limit did not clear in time" }, { alwaysNotify: employee?.alwaysNotify });
+          notifyParentSession(erroredSession, { error: "Claude usage limit did not clear in time" });
         }
         context.emit("session:completed", {
           sessionId: currentSession.id,
@@ -2725,7 +2153,7 @@ async function runWebSession(
       }
     }
     if (completedSession) {
-      notifyParentSession(completedSession, { result: result.result, error: result.error ?? null, cost: result.cost, durationMs: result.durationMs }, { alwaysNotify: employee?.alwaysNotify });
+      notifyParentSession(completedSession, { result: result.result, error: result.error ?? null, cost: result.cost, durationMs: result.durationMs });
     }
 
     context.emit("session:completed", {
@@ -2755,7 +2183,7 @@ async function runWebSession(
       lastError: errMsg,
     });
     if (erroredSession) {
-      notifyParentSession(erroredSession, { error: errMsg }, { alwaysNotify: employee?.alwaysNotify });
+      notifyParentSession(erroredSession, { error: errMsg });
     }
     context.emit("session:completed", {
       sessionId: currentSession.id,
@@ -2763,7 +2191,5 @@ async function runWebSession(
       error: errMsg,
     });
     logger.error(`Web session ${currentSession.id} error: ${errMsg}`);
-  } finally {
-    if (mcpConfigPath) cleanupMcpConfigFile(currentSession.id);
   }
 }

@@ -5,16 +5,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { JinnConfig, Connector, Employee, InterruptibleEngine } from "../shared/types.js";
+import type { JinnConfig, Connector, Employee } from "../shared/types.js";
 import { loadConfig } from "../shared/config.js";
 import { configureLogger, logger } from "../shared/logger.js";
 import { initDb, recoverStaleSessions, recoverStaleQueueItems, getInterruptedSessions, listSessions, updateSession } from "../sessions/registry.js";
 import { SessionManager, type RouteOptions } from "../sessions/manager.js";
 import { ClaudeEngine } from "../engines/claude.js";
 import { CodexEngine } from "../engines/codex.js";
-import { GeminiEngine } from "../engines/gemini.js";
-import { LocalEngine } from "../engines/local.js";
-import { handleApiRequest, resumePendingWebQueueItems, setActivityLimits, type ApiContext } from "./api.js";
+import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
 import { ensureFilesDir } from "./files.js";
 import { initStt } from "../stt/stt.js";
 import { startWatchers, stopWatchers, syncSkillSymlinks } from "./watcher.js";
@@ -22,7 +20,6 @@ import { SlackConnector } from "../connectors/slack/index.js";
 import { DiscordConnector, type DiscordConnectorConfig } from "../connectors/discord/index.js";
 import { RemoteDiscordConnector } from "../connectors/discord/remote.js";
 import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
-import { TelegramConnector } from "../connectors/telegram/index.js";
 import { loadJobs } from "../cron/jobs.js";
 import { startScheduler, reloadScheduler, stopScheduler } from "../cron/scheduler.js";
 import { scanOrg } from "./org.js";
@@ -133,23 +130,9 @@ export async function startGateway(
   // Set up engines
   const claudeEngine = new ClaudeEngine();
   const codexEngine = new CodexEngine();
-  const geminiEngine = new GeminiEngine();
-  const engines = new Map<string, InterruptibleEngine>();
+  const engines = new Map<string, InstanceType<typeof ClaudeEngine> | InstanceType<typeof CodexEngine>>();
   engines.set("claude", claudeEngine);
   engines.set("codex", codexEngine);
-  engines.set("gemini", geminiEngine);
-
-  // Register local engine if configured (OpenAI-compatible API, e.g. LM Studio)
-  // Expected config.yaml:
-  //   engines:
-  //     local:
-  //       url: "http://localhost:1234"
-  //       model: "qwen3.5-9b-mlx"
-  if (config.engines?.local?.url) {
-    const localEngine = new LocalEngine(config.engines.local);
-    engines.set("local", localEngine);
-    logger.info(`Local engine registered: ${config.engines.local.model} @ ${config.engines.local.url}`);
-  }
 
   // Derive connector names from config
   const connectorNames: string[] = [];
@@ -158,9 +141,6 @@ export async function startGateway(
   }
   if (config.connectors?.discord?.botToken || config.connectors?.discord?.proxyVia) {
     connectorNames.push("discord");
-  }
-  if (config.connectors?.telegram?.botToken) {
-    connectorNames.push("telegram");
   }
   if (config.connectors?.whatsapp) {
     connectorNames.push("whatsapp");
@@ -176,8 +156,6 @@ export async function startGateway(
   // Start connectors
   const connectors: Connector[] = [];
   const connectorMap = new Map<string, Connector>();
-  /** IDs of connectors created from config.connectors.instances[] (vs legacy top-level connectors) */
-  const instanceConnectorIds = new Set<string>();
 
   if (config.connectors?.slack?.appToken && config.connectors?.slack?.botToken) {
     try {
@@ -269,26 +247,6 @@ export async function startGateway(
       logger.info(`Discord connector started in remote mode (via ${config.connectors.discord.proxyVia})`);
     } catch (err) {
       logger.error(`Failed to start remote Discord connector: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  if (config.connectors?.telegram?.botToken) {
-    try {
-      const telegram = new TelegramConnector({
-        botToken: config.connectors.telegram.botToken,
-        allowFrom: config.connectors.telegram.allowFrom,
-        ignoreOldMessagesOnBoot: config.connectors.telegram.ignoreOldMessagesOnBoot,
-      });
-      telegram.onMessage((msg) => {
-        sessionManager.route(msg, telegram).catch((err) => {
-          logger.error(`Telegram route error: ${err instanceof Error ? err.message : err}`);
-        });
-      });
-      await telegram.start();
-      connectors.push(telegram);
-      connectorMap.set("telegram", telegram);
-    } catch (err) {
-      logger.error(`Failed to start Telegram connector: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -386,7 +344,6 @@ export async function startGateway(
         }
         connectors.push(connector);
         connectorMap.set(id, connector);
-        instanceConnectorIds.add(id);
         logger.info(`Connector instance "${id}" (type: ${type}, employee: ${employee || "default"}) started`);
       } catch (err) {
         logger.error(`Failed to start connector instance "${id}": ${err instanceof Error ? err.message : err}`);
@@ -396,117 +353,6 @@ export async function startGateway(
 
   sessionManager.setConnectorProvider(() => connectorMap);
 
-  // Reload connector instances from config (stop old instances, start new ones)
-  async function reloadConnectorInstances(): Promise<{ started: string[]; stopped: string[]; errors: string[] }> {
-    const freshConfig = loadConfig();
-    const started: string[] = [];
-    const stopped: string[] = [];
-    const errors: string[] = [];
-
-    // Find instance-based connectors (keys that came from instances array)
-    const instanceIds = new Set<string>();
-    if (freshConfig.connectors?.instances) {
-      for (const inst of freshConfig.connectors.instances) {
-        if (inst.id) instanceIds.add(inst.id);
-      }
-    }
-
-    // Stop old instance connectors that are no longer in config or need refresh
-    for (const [id, connector] of connectorMap.entries()) {
-      // Skip legacy (top-level) connectors — only reload instance-based ones
-      if (!instanceConnectorIds.has(id)) continue;
-      try {
-        await connector.stop();
-        connectorMap.delete(id);
-        instanceConnectorIds.delete(id);
-        const idx = connectors.indexOf(connector);
-        if (idx >= 0) connectors.splice(idx, 1);
-        stopped.push(id);
-        logger.info(`Stopped connector instance "${id}" for reload`);
-      } catch (err) {
-        errors.push(`Failed to stop ${id}: ${err instanceof Error ? err.message : err}`);
-      }
-    }
-
-    // Start new instances from fresh config
-    if (freshConfig.connectors?.instances) {
-      for (const instance of freshConfig.connectors.instances) {
-        const { id, type, employee, ...typeConfig } = instance;
-        if (!id || !type) continue;
-        if (connectorMap.has(id)) continue;
-
-        try {
-          let connector: Connector;
-          switch (type) {
-            case "discord": {
-              const discordConfig = { ...typeConfig, id } as DiscordConnectorConfig;
-              const discord = new DiscordConnector(discordConfig);
-              discord.onMessage((msg) => {
-                const routeOpts: RouteOptions = {};
-                if (employee) {
-                  const emp = employeeRegistry.get(employee);
-                  if (emp) routeOpts.employee = emp;
-                }
-                sessionManager.route(msg, discord, routeOpts).catch((err) => {
-                  logger.error(`${id} route error: ${err instanceof Error ? err.message : err}`);
-                });
-              });
-              await discord.start();
-              connector = discord;
-              break;
-            }
-            case "slack": {
-              const slackConfig = { ...typeConfig, id } as any;
-              const slack = new SlackConnector(slackConfig);
-              slack.onMessage((msg) => {
-                const routeOpts: RouteOptions = {};
-                if (employee) {
-                  const emp = employeeRegistry.get(employee);
-                  if (emp) routeOpts.employee = emp;
-                }
-                sessionManager.route(msg, slack, routeOpts).catch((err) => {
-                  logger.error(`${id} route error: ${err instanceof Error ? err.message : err}`);
-                });
-              });
-              await slack.start();
-              connector = slack;
-              break;
-            }
-            case "whatsapp": {
-              const whatsapp = new WhatsAppConnector({ ...typeConfig } as any);
-              whatsapp.onMessage((msg) => {
-                const routeOpts: RouteOptions = {};
-                if (employee) {
-                  const emp = employeeRegistry.get(employee);
-                  if (emp) routeOpts.employee = emp;
-                }
-                sessionManager.route(msg, whatsapp, routeOpts).catch((err) => {
-                  logger.error(`${id} route error: ${err instanceof Error ? err.message : err}`);
-                });
-              });
-              await whatsapp.start();
-              connector = whatsapp;
-              break;
-            }
-            default:
-              errors.push(`Unknown connector type "${type}" for instance "${id}"`);
-              continue;
-          }
-          connectors.push(connector);
-          connectorMap.set(id, connector);
-          instanceConnectorIds.add(id);
-          started.push(id);
-          logger.info(`Connector instance "${id}" (type: ${type}, employee: ${employee || "default"}) started`);
-        } catch (err) {
-          errors.push(`Failed to start "${id}": ${err instanceof Error ? err.message : err}`);
-          logger.error(`Failed to start connector instance "${id}": ${err instanceof Error ? err.message : err}`);
-        }
-      }
-    }
-
-    return { started, stopped, errors };
-  }
-
   // Start cron scheduler
   const cronJobs = loadJobs();
   startScheduler(cronJobs, sessionManager, config, connectorMap);
@@ -514,7 +360,6 @@ export async function startGateway(
 
   // Mutable config reference for hot-reload
   let currentConfig = config;
-  setActivityLimits(currentConfig);
 
   const startTime = Date.now();
 
@@ -542,7 +387,6 @@ export async function startGateway(
     getConfig: () => currentConfig,
     emit,
     connectors: connectorMap,
-    reloadConnectorInstances,
   };
 
   // Replay any pending web queue items (e.g. gateway restart mid-run)
@@ -630,21 +474,6 @@ export async function startGateway(
       try {
         currentConfig = loadConfig();
         apiContext.config = currentConfig;
-        setActivityLimits(currentConfig);
-
-        // Hot-reload local engine registration — kill active streams first
-        const oldLocal = engines.get("local");
-        if (oldLocal && "killAll" in oldLocal) {
-          (oldLocal as { killAll: () => void }).killAll();
-        }
-        if (currentConfig.engines?.local?.url) {
-          const localEngine = new LocalEngine(currentConfig.engines.local);
-          engines.set("local", localEngine);
-          logger.info(`Local engine reloaded: ${currentConfig.engines.local.model} @ ${currentConfig.engines.local.url}`);
-        } else {
-          engines.delete("local");
-        }
-
         logger.info("Config reloaded successfully");
         emit("config:reloaded", {});
       } catch (err) {
@@ -749,11 +578,6 @@ export async function startGateway(
     // Terminate live engine subprocesses after marking sessions.
     claudeEngine.killAll();
     codexEngine.killAll();
-    for (const [, eng] of engines) {
-      if ("killAll" in eng && eng !== claudeEngine && eng !== codexEngine) {
-        (eng as { killAll: () => void }).killAll();
-      }
-    }
 
     // Stop cron scheduler
     stopScheduler();

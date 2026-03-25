@@ -1,14 +1,10 @@
-export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "thinking" | "status" | "error";
+export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error";
 
 export interface StreamDelta {
   type: StreamDeltaType;
   content: string;
   toolName?: string;
   toolId?: string;
-  toolArgs?: Record<string, unknown>;
-  thinkingText?: string;
-  resultContent?: string;
-  timestamp?: number;
 }
 
 export interface Engine {
@@ -106,8 +102,6 @@ export interface Connector {
   editMessage(target: Target, text: string): Promise<void>;
   setTypingStatus?(channelId: string, threadTs: string | undefined, status: string): Promise<void>;
   onMessage(handler: (msg: IncomingMessage) => void): void;
-  /** Return the bound employee name, if any */
-  getEmployee?(): string | undefined;
 }
 
 export interface IncomingMessage {
@@ -202,7 +196,7 @@ export interface Employee {
   name: string;
   displayName: string;
   department: string;
-  rank: "executive" | "director" | "manager" | "lead" | "senior" | "employee";
+  rank: "executive" | "manager" | "senior" | "employee";
   engine: string;
   model: string;
   persona: string;
@@ -216,30 +210,12 @@ export interface Employee {
   maxCostUsd?: number;
   /** Default effort level for sessions assigned to this employee */
   effortLevel?: string;
-  /** Whether to notify the parent session when this employee's child session completes. Default: true */
-  alwaysNotify?: boolean;
-  /** Relative path in the org tree, e.g. "nexamon-studio/design" */
-  orgPath?: string;
-  /** Name of the employee's direct manager (deduced from parent department.yaml) */
-  reportsTo?: string;
 }
 
 export interface Department {
   name: string;
   displayName: string;
-  description?: string;
-  /** Name of the department manager (employee name) */
-  manager?: string;
-  /** Relative path in the org tree, e.g. "nexamon-studio/design" */
-  path: string;
-  /** Parent department path, e.g. "nexamon-studio" */
-  parent?: string;
-  /** Sub-department paths */
-  children: string[];
-  /** Direct employee names in this department */
-  employees: string[];
-  /** Services/capabilities this department provides to other departments */
-  provides?: string[];
+  description: string;
 }
 
 /** Stdio-based MCP server (spawned as child process) */
@@ -315,12 +291,6 @@ export interface DiscordConnectorConfig {
   proxyVia?: string;
 }
 
-export interface TelegramConnectorConfig {
-  botToken: string;
-  allowFrom?: number[];
-  ignoreOldMessagesOnBoot?: boolean;
-}
-
 export interface WhatsAppConnectorConfig {
   /** Unique instance identifier (e.g. "whatsapp-main") */
   id?: string;
@@ -336,8 +306,8 @@ export interface WhatsAppConnectorConfig {
 export interface ConnectorInstance {
   /** Unique instance ID */
   id: string;
-  /** Connector type */
-  type: "discord" | "discord-remote" | "slack" | "whatsapp" | "telegram";
+  /** Connector type: "discord" | "slack" | "whatsapp" */
+  type: "discord" | "slack" | "whatsapp";
   /** Employee to bind to this connector */
   employee?: string;
   /** Type-specific configuration */
@@ -348,24 +318,19 @@ export interface PortalConfig {
   portalName?: string;
   operatorName?: string;
   language?: string;
-  onboarded?: boolean;
 }
 
 export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
   engines: {
-    default: "claude" | "codex" | "gemini";
+    default: "claude" | "codex";
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
-    gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
-    /** OpenAI-compatible local engine (e.g. LM Studio, llama.cpp). Config: { url, model } */
-    local?: { url: string; model: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;
     slack?: SlackConnectorConfig;
-    telegram?: TelegramConnectorConfig;
     discord?: DiscordConnectorConfig;
     whatsapp?: WhatsAppConnectorConfig;
     /** Named connector instances — allows multiple connectors of the same type */
@@ -380,7 +345,7 @@ export interface JinnConfig {
     /** What to do when Claude hits a usage/rate limit. Default: "fallback" */
     rateLimitStrategy?: "wait" | "fallback";
     /** Engine to use when rateLimitStrategy="fallback". Default: "codex" */
-    fallbackEngine?: "codex" | "local" | string;
+    fallbackEngine?: "codex";
   };
   cron?: {
     defaultDelivery?: CronDelivery;
@@ -404,12 +369,4 @@ export interface JinnConfig {
     languages?: string[];
   };
   remotes?: Record<string, { url: string; label?: string }>;
-  kanban?: {
-    columns?: Array<{ id: string; title: string }>;
-  };
-  activity?: {
-    maxEventsPerSession?: number;
-    maxEventsGlobal?: number;
-    retentionDays?: number;
-  };
 }
