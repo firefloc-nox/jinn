@@ -54,7 +54,7 @@ export interface OrgTreeNode {
 
 export interface OrgTreeData {
   tree: OrgTreeNode[];
-  unassigned: string[];
+  unassigned: OrgTreeEmployee[];
 }
 
 const BASE =
