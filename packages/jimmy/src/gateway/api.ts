@@ -821,10 +821,56 @@ export async function handleApiRequest(
       return json(res, content);
     }
 
-    // GET /api/org/departments/:name/board
-    params = matchRoute("/api/org/departments/:name/board", pathname);
-    if (method === "GET" && params) {
-      const boardPath = path.join(ORG_DIR, params.name, "board.json");
+    // POST /api/org/employees — create a new employee
+    if (method === "POST" && pathname === "/api/org/employees") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+      if (!body.name || !body.displayName || !body.persona) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing required fields: name, displayName, persona" }));
+        return;
+      }
+      const { createEmployeeYaml } = await import("./org.js");
+      const filePath = createEmployeeYaml(body);
+      if (!filePath) {
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Employee "${body.name}" already exists` }));
+        return;
+      }
+      context.emit("org:updated", { employee: body.name, action: "created" });
+      return json(res, { status: "ok", name: body.name.toLowerCase().replace(/\s+/g, "-") });
+    }
+
+    // PATCH /api/org/employees/:name — update employee fields
+    params = matchRoute("/api/org/employees/:name", pathname);
+    if (method === "PATCH" && params) {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+      const { updateEmployeeYaml } = await import("./org.js");
+      const updated = updateEmployeeYaml(params.name, body);
+      if (!updated) return notFound(res);
+      context.emit("org:updated", { employee: params.name });
+      return json(res, { status: "ok" });
+    }
+
+    // DELETE /api/org/employees/:name — delete an employee
+    params = matchRoute("/api/org/employees/:name", pathname);
+    if (method === "DELETE" && params) {
+      const { deleteEmployeeYaml } = await import("./org.js");
+      const deleted = deleteEmployeeYaml(params.name);
+      if (!deleted) return notFound(res);
+      context.emit("org:updated", { employee: params.name, action: "deleted" });
+      return json(res, { status: "ok" });
+    }
+
+    // GET /api/org/departments/*/board — supports nested paths like nexamon-studio/design
+    if (method === "GET" && pathname.startsWith("/api/org/departments/") && pathname.endsWith("/board")) {
+      const deptPath = pathname.slice("/api/org/departments/".length, -"/board".length);
+      const resolved = path.resolve(path.join(ORG_DIR, deptPath, "board.json"));
+      if (!resolved.startsWith(path.resolve(ORG_DIR) + path.sep)) return badRequest(res, "Invalid path");
+      const boardPath = resolved;
       if (!fs.existsSync(boardPath)) return notFound(res);
       const board = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
       return json(res, board);

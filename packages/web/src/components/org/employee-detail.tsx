@@ -6,6 +6,7 @@ import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { useSettings } from "@/app/settings-provider";
 import { emojiForName } from "@/lib/emoji-pool";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
+import { EmployeeFormDialog } from "@/components/org/employee-form-dialog";
 
 interface SessionData {
   id: string;
@@ -47,13 +48,21 @@ function RankBadge({ rank }: { rank: string }) {
   );
 }
 
-export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?: Employee }) {
+export function EmployeeDetail({ name, prefetched, onDeleted, onUpdated }: {
+  name: string;
+  prefetched?: Employee;
+  onDeleted?: () => void;
+  onUpdated?: () => void;
+}) {
   const [employee, setEmployee] = useState<Employee | null>(prefetched ?? null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loading, setLoading] = useState(!prefetched);
   const [error, setError] = useState<string | null>(null);
   const [personaExpanded, setPersonaExpanded] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { settings, setEmployeeOverride } = useSettings();
 
   useEffect(() => {
@@ -109,6 +118,20 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
     );
   }
 
+  async function handleDelete() {
+    if (!employee) return;
+    setDeleting(true);
+    try {
+      await api.deleteEmployee(employee.name);
+      onDeleted?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to delete employee");
+      setDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (!employee) return null;
 
   const rank = employee.rank || "employee";
@@ -118,9 +141,25 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
     persona.length > 200 && !personaExpanded
       ? persona.slice(0, 200) + "..."
       : persona;
+  const isExecutive = rank === "executive";
 
   return (
     <div className="flex flex-col gap-[var(--space-6)]">
+      {/* Edit dialog */}
+      {showEditDialog && (
+        <EmployeeFormDialog
+          open={showEditDialog}
+          onClose={() => setShowEditDialog(false)}
+          employee={employee}
+          onSaved={() => {
+            setShowEditDialog(false);
+            // Reload employee data
+            api.getEmployee(employee.name).then(setEmployee).catch(() => {});
+            onUpdated?.();
+          }}
+        />
+      )}
+
       {/* Main info card */}
       <div className="rounded-[var(--radius-lg,16px)] border border-[var(--separator)] bg-[var(--material-regular)] p-[var(--space-6)]">
         <div className="flex items-start justify-between mb-[var(--space-4)]">
@@ -151,7 +190,29 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
               </p>
             </div>
           </div>
-          <RankBadge rank={rank} />
+          <div className="flex items-center gap-[var(--space-2)]">
+            <RankBadge rank={rank} />
+            {!isExecutive && (
+              <button
+                onClick={() => setShowEditDialog(true)}
+                title="Edit employee"
+                style={{
+                  width: 28, height: 28,
+                  borderRadius: "var(--radius-sm, 6px)",
+                  background: "var(--fill-tertiary)",
+                  color: "var(--text-secondary)",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 13,
+                }}
+              >
+                ✏️
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-[var(--space-4)]">
@@ -236,6 +297,50 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
           </div>
         )}
       </div>
+
+      {/* Delete section */}
+      {!isExecutive && (
+        <div className="rounded-[var(--radius-lg,16px)] border p-[var(--space-4)] flex items-center justify-between" style={{ borderColor: "color-mix(in srgb, var(--system-red) 30%, transparent)", background: "color-mix(in srgb, var(--system-red) 5%, transparent)" }}>
+          <div>
+            <p className="text-[length:var(--text-body)] font-[var(--weight-semibold)] text-[var(--system-red)] m-0">Remove employee</p>
+            <p className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mt-[2px] m-0">Permanently delete this employee's YAML file</p>
+          </div>
+          {!deleteConfirm ? (
+            <button
+              onClick={() => setDeleteConfirm(true)}
+              style={{
+                padding: "var(--space-2) var(--space-3)",
+                borderRadius: "var(--radius-md, 10px)",
+                background: "color-mix(in srgb, var(--system-red) 15%, transparent)",
+                color: "var(--system-red)",
+                border: "1px solid color-mix(in srgb, var(--system-red) 30%, transparent)",
+                cursor: "pointer",
+                fontSize: "var(--text-caption1)",
+                fontWeight: "var(--weight-semibold)",
+              }}
+            >
+              Delete
+            </button>
+          ) : (
+            <div className="flex gap-[var(--space-2)]">
+              <button
+                onClick={() => setDeleteConfirm(false)}
+                disabled={deleting}
+                style={{ padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-md, 10px)", background: "var(--fill-tertiary)", color: "var(--text-secondary)", border: "none", cursor: "pointer", fontSize: "var(--text-caption1)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{ padding: "var(--space-2) var(--space-3)", borderRadius: "var(--radius-md, 10px)", background: "var(--system-red)", color: "white", border: "none", cursor: deleting ? "not-allowed" : "pointer", fontSize: "var(--text-caption1)", fontWeight: "var(--weight-semibold)", opacity: deleting ? 0.6 : 1 }}
+              >
+                {deleting ? "Deleting…" : "Confirm Delete"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Recent Sessions */}
       <div>
