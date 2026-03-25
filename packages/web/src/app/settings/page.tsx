@@ -9,6 +9,7 @@ import { useTheme } from "@/app/providers"
 import { THEMES } from "@/lib/themes"
 import type { ThemeId } from "@/lib/themes"
 import { api } from "@/lib/api"
+import { EmojiPicker } from "@/components/ui/emoji-picker"
 
 // ---------------------------------------------------------------------------
 // Accent color presets
@@ -39,13 +40,14 @@ interface Config {
     default?: string
     claude?: { bin?: string; model?: string; effortLevel?: string }
     codex?: { bin?: string; model?: string; effortLevel?: string }
+    local?: { url?: string; model?: string }
   }
   sessions?: {
     maxDurationMinutes?: number
     maxCostUsd?: number
     interruptOnNewMessage?: boolean
     rateLimitStrategy?: "wait" | "fallback"
-    fallbackEngine?: "codex"
+    fallbackEngine?: string
   }
   connectors?: {
     slack?: {
@@ -91,6 +93,11 @@ interface Config {
   portal?: {
     portalName?: string
     operatorName?: string
+  }
+  activity?: {
+    maxEventsPerSession?: number
+    maxEventsGlobal?: number
+    retentionDays?: number
   }
   [key: string]: unknown
 }
@@ -213,6 +220,112 @@ function ToggleSwitch({
         }}
       />
     </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Local model selector — fetches available models from the local server
+// ---------------------------------------------------------------------------
+
+function LocalModelSelect({
+  url,
+  value,
+  onChange,
+}: {
+  url: string
+  value: string
+  onChange: (model: string) => void
+}) {
+  const [models, setModels] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  const fetchModels = async () => {
+    if (!url) return
+    setLoading(true)
+    setError("")
+    try {
+      const resp = await api.getLocalModels()
+      const list = (resp.data ?? []) as Array<{ id: string }>
+      setModels(list.map((m) => m.id))
+      if (list.length > 0 && !value) {
+        onChange(list[0].id)
+      }
+    } catch {
+      setError("Connection failed")
+      setModels([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch on mount and when URL changes
+  useEffect(() => {
+    fetchModels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-[var(--space-1)] text-[length:var(--text-caption1)] text-[var(--text-tertiary)]">
+        <Loader2 className="w-3 h-3 animate-spin" /> Loading models…
+      </div>
+    )
+  }
+
+  if (error || models.length === 0) {
+    return (
+      <div className="flex flex-col gap-[var(--space-1)]">
+        <SettingsInput
+          value={value}
+          onChange={onChange}
+          placeholder="e.g. qwen3-8b, llama-3.3-70b"
+        />
+        {error && (
+          <div className="text-[length:var(--text-caption1)] text-[var(--system-red)]">
+            {error} — saisie manuelle activée
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={fetchModels}
+          className="self-start px-[var(--space-2)] py-[var(--space-1)] rounded-[var(--radius-sm)] text-[length:var(--text-caption1)] border border-[var(--separator)] bg-[var(--material-thin)] hover:bg-[var(--material-thick)] transition-colors"
+        >
+          <span className="flex items-center gap-[var(--space-1)]">
+            <RotateCcw className="w-3 h-3" /> Retry
+          </span>
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-[var(--space-1)]">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-[var(--radius-sm)] border border-[var(--separator)] bg-[var(--material-thin)] px-[var(--space-2)] py-[var(--space-1)] text-[length:var(--text-body)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+      >
+        {!value && <option value="">Select a model…</option>}
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <div className="flex items-center gap-[var(--space-2)]">
+        <span className="text-[length:var(--text-caption1)] text-[var(--system-green)] flex items-center gap-[var(--space-1)]">
+          <Check className="w-3 h-3" /> {models.length} model{models.length !== 1 ? "s" : ""} available
+        </span>
+        <button
+          type="button"
+          onClick={fetchModels}
+          className="px-[var(--space-2)] py-[var(--space-1)] rounded-[var(--radius-sm)] text-[length:var(--text-caption1)] border border-[var(--separator)] bg-[var(--material-thin)] hover:bg-[var(--material-thick)] transition-colors"
+        >
+          <RotateCcw className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -442,6 +555,7 @@ export default function SettingsPage() {
   const [emojiValue, setEmojiValue] = useState(settings.portalEmoji ?? "")
   const [languageValue, setLanguageValue] = useState(settings.language ?? "English")
   const [customHex, setCustomHex] = useState(settings.accentColor ?? "")
+  const [showCooEmojiPicker, setShowCooEmojiPicker] = useState(false)
 
   // Gateway config state
   const [config, setConfig] = useState<Config>({})
@@ -463,7 +577,7 @@ export default function SettingsPage() {
   useEffect(() => {
     api.getOrg().then((org: any) => {
       if (org?.employees) {
-        setEmployees(org.employees.map((e: any) => ({ name: e.name, displayName: e.displayName || e.name })))
+        setEmployees(org.employees.map((e: any) => typeof e === 'string' ? { name: e, displayName: e } : { name: e.name, displayName: e.displayName || e.name }))
       }
     }).catch(() => {})
   }, [])
@@ -701,6 +815,41 @@ export default function SettingsPage() {
             </div>
           </Section>
 
+          {/* -- COO Emoji -- */}
+          <Section title="COO Emoji">
+            <div>
+              <div className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
+                Choose an emoji for the COO shown in the sidebar.
+              </div>
+              <div className="relative flex items-center gap-[var(--space-4)]">
+                <button
+                  onClick={() => setShowCooEmojiPicker(!showCooEmojiPicker)}
+                  className="text-4xl cursor-pointer bg-transparent border-none p-0"
+                >
+                  {settings.portalEmoji ?? "\u{1F9DE}"}
+                </button>
+                <div>
+                  <div className="text-[length:var(--text-body)] font-[var(--weight-semibold)] text-[var(--text-primary)]">
+                    {settings.operatorName || "Jimbo"}
+                  </div>
+                  <div className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)]">
+                    Click emoji to change
+                  </div>
+                </div>
+                {showCooEmojiPicker && (
+                  <EmojiPicker
+                    current={settings.portalEmoji ?? "\u{1F9DE}"}
+                    onSelect={(emoji) => {
+                      setPortalEmoji(emoji)
+                      setShowCooEmojiPicker(false)
+                    }}
+                    onClose={() => setShowCooEmojiPicker(false)}
+                  />
+                )}
+              </div>
+            </div>
+          </Section>
+
           {/* -- Section 2: Branding -- */}
           <Section title="Branding">
             <div
@@ -769,7 +918,7 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   className="apple-input w-[80px] text-center text-[length:var(--text-title2)] px-[8px] py-[6px] bg-[var(--bg-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm)]"
-                  placeholder="\ud83e\udd16"
+                  placeholder="\ud83e\uddde"
                   value={emojiValue}
                   onChange={(e) => setEmojiValue(e.target.value)}
                   onBlur={() => setPortalEmoji(emojiValue || null)}
@@ -882,6 +1031,7 @@ export default function SettingsPage() {
                     options={[
                       { value: "claude", label: "Claude" },
                       { value: "codex", label: "Codex" },
+                      ...(config.engines?.local?.url ? [{ value: "local", label: "Local Model" }] : []),
                     ]}
                   />
                 </FieldRow>
@@ -980,6 +1130,86 @@ export default function SettingsPage() {
                     ]}
                   />
                 </FieldRow>
+
+                <div
+                  className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]"
+                />
+
+                <div
+                  className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]"
+                >
+                  Local Models
+                </div>
+                <div
+                  className="text-[length:var(--text-caption1)] text-[var(--label-secondary)] mb-[var(--space-2)]"
+                >
+                  Connect to a local OpenAI-compatible server (LM Studio, llama.cpp).
+                </div>
+                <FieldRow label="Enable Local Engine">
+                  <ToggleSwitch
+                    checked={!!config.engines?.local?.url}
+                    onChange={(enabled) => {
+                      if (enabled) {
+                        updateConfig(["engines", "local"], { url: "http://localhost:11434", model: "" })
+                      } else {
+                        updateConfig(["engines", "local"], null)
+                      }
+                    }}
+                  />
+                </FieldRow>
+                {!!config.engines?.local?.url && (
+                  <>
+                    <div
+                      className="flex gap-[var(--space-2)] mb-[var(--space-2)] flex-wrap"
+                    >
+                      <button
+                        type="button"
+                        className="px-[var(--space-2)] py-[var(--space-1)] rounded-[var(--radius-sm)] text-[length:var(--text-caption1)] border border-[var(--separator)] bg-[var(--material-thin)] hover:bg-[var(--material-thick)] transition-colors"
+                        onClick={() => {
+                          updateConfig(["engines", "local", "url"], "http://127.0.0.1:1234")
+                        }}
+                      >
+                        LM Studio (1234)
+                      </button>
+                      <button
+                        type="button"
+                        className="px-[var(--space-2)] py-[var(--space-1)] rounded-[var(--radius-sm)] text-[length:var(--text-caption1)] border border-[var(--separator)] bg-[var(--material-thin)] hover:bg-[var(--material-thick)] transition-colors"
+                        onClick={() => {
+                          updateConfig(["engines", "local", "url"], "http://localhost:11434")
+                        }}
+                      >
+                        llama-server (11434)
+                      </button>
+                      <button
+                        type="button"
+                        className="px-[var(--space-2)] py-[var(--space-1)] rounded-[var(--radius-sm)] text-[length:var(--text-caption1)] border border-[var(--separator)] bg-[var(--material-thin)] hover:bg-[var(--material-thick)] transition-colors"
+                        onClick={() => {
+                          updateConfig(["engines", "local", "url"], "http://localhost:8080")
+                        }}
+                      >
+                        llama.cpp (8080)
+                      </button>
+                    </div>
+                    <FieldRow label="Server URL">
+                      <SettingsInput
+                        value={config.engines?.local?.url ?? ""}
+                        onChange={(v) =>
+                          updateConfig(["engines", "local", "url"], v)
+                        }
+                        placeholder="http://localhost:11434"
+                      />
+                    </FieldRow>
+                    <FieldRow label="Model">
+                      <LocalModelSelect
+                        url={config.engines?.local?.url ?? ""}
+                        value={config.engines?.local?.model ?? ""}
+                        onChange={(v) =>
+                          updateConfig(["engines", "local", "model"], v)
+                        }
+                      />
+                    </FieldRow>
+                  </>
+                )}
               </Section>
 
               {/* -- Section 5: Sessions -- */}
@@ -1012,16 +1242,36 @@ export default function SettingsPage() {
                     }
                     options={[
                       { value: "wait", label: "Wait & Auto-Resume" },
-                      { value: "fallback", label: "Switch to GPT (Codex)" },
+                      { value: "fallback", label: "Switch to Fallback Engine" },
                     ]}
                   />
                 </FieldRow>
                 <div
                   className="text-[length:var(--text-caption1)] text-[var(--label-secondary)] mt-[4px]"
                 >
-                  "Wait" pauses the session and continues automatically when Claude resets.
-                  "Switch" answers immediately using GPT, then returns to Claude once the reset window passes.
+                  &ldquo;Wait&rdquo; pauses the session and continues automatically when Claude resets.
+                  &ldquo;Switch&rdquo; answers immediately using the fallback engine, then returns to Claude once the reset window passes.
                 </div>
+
+                {config.sessions?.rateLimitStrategy === "fallback" && (
+                  <>
+                    <div
+                      className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]"
+                    />
+                    <FieldRow label="Fallback Engine">
+                      <SettingsSelect
+                        value={config.sessions?.fallbackEngine ?? "codex"}
+                        onChange={(v) =>
+                          updateConfig(["sessions", "fallbackEngine"], v)
+                        }
+                        options={[
+                          { value: "codex", label: "Codex (GPT)" },
+                          ...(config.engines?.local?.url ? [{ value: "local", label: "Local Model" }] : []),
+                        ]}
+                      />
+                    </FieldRow>
+                  </>
+                )}
               </Section>
 
               {/* -- Section 6: Connectors -- */}
@@ -1204,17 +1454,37 @@ export default function SettingsPage() {
                   <div className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)]">
                     Connector Instances
                   </div>
-                  <button
-                    className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--accent)] hover:opacity-80 transition-opacity"
-                    onClick={() => {
-                      const instances = [...(config.connectors?.instances || [])]
-                      const id = `discord-${instances.length + 1}`
-                      instances.push({ id, type: "discord" })
-                      updateConfig(["connectors", "instances"], instances)
-                    }}
-                  >
-                    + Add Instance
-                  </button>
+                  <div className="flex items-center gap-[var(--space-2)]">
+                    <button
+                      className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors flex items-center gap-1"
+                      onClick={async () => {
+                        try {
+                          const result = await api.reloadConnectors()
+                          const parts: string[] = []
+                          if (result.stopped.length) parts.push(`Stopped: ${result.stopped.join(", ")}`)
+                          if (result.started.length) parts.push(`Started: ${result.started.join(", ")}`)
+                          if (result.errors.length) parts.push(`Errors: ${result.errors.join(", ")}`)
+                          alert(parts.length ? parts.join("\n") : "No connector instances to reload")
+                        } catch {
+                          alert("Failed to reload connectors")
+                        }
+                      }}
+                    >
+                      <RotateCcw size={12} />
+                      Reload
+                    </button>
+                    <button
+                      className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--accent)] hover:opacity-80 transition-opacity"
+                      onClick={() => {
+                        const instances = [...(config.connectors?.instances || [])]
+                        const id = `discord-${instances.length + 1}`
+                        instances.push({ id, type: "discord" })
+                        updateConfig(["connectors", "instances"], instances)
+                      }}
+                    >
+                      + Add Instance
+                    </button>
+                  </div>
                 </div>
                 <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
                   Add multiple connector instances of the same type, each bound to a specific employee.
@@ -1468,7 +1738,41 @@ export default function SettingsPage() {
                 </FieldRow>
               </Section>
 
-              {/* -- Section 8: Voice Input (STT) -- */}
+              {/* -- Section 8: Activity Feed Limits -- */}
+              <Section title="Activity Feed">
+                <FieldRow label="Max events per session">
+                  <SettingsInput
+                    type="number"
+                    value={String(config.activity?.maxEventsPerSession ?? "")}
+                    onChange={(v) =>
+                      updateConfig(["activity", "maxEventsPerSession"], Number(v) || 0)
+                    }
+                    placeholder="500"
+                  />
+                </FieldRow>
+                <FieldRow label="Max events global">
+                  <SettingsInput
+                    type="number"
+                    value={String(config.activity?.maxEventsGlobal ?? "")}
+                    onChange={(v) =>
+                      updateConfig(["activity", "maxEventsGlobal"], Number(v) || 0)
+                    }
+                    placeholder="10000"
+                  />
+                </FieldRow>
+                <FieldRow label="Retention (days)">
+                  <SettingsInput
+                    type="number"
+                    value={String(config.activity?.retentionDays ?? "")}
+                    onChange={(v) =>
+                      updateConfig(["activity", "retentionDays"], Number(v) || 0)
+                    }
+                    placeholder="7"
+                  />
+                </FieldRow>
+              </Section>
+
+              {/* -- Section 9: Voice Input (STT) -- */}
               <SttSettingsSection />
 
               {/* Save button for gateway config */}
