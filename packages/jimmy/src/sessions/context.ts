@@ -94,7 +94,7 @@ export function buildContext(opts: {
     sections.push({
       tier: Tier.STANDARD,
       marker: "## Self-evolution",
-      content: buildEvolutionContext(portalName),
+      content: buildEvolutionContext(portalName, opts.config),
       summary: `## Self-evolution\nUpdate knowledge files in \`~/.jinn/knowledge/\` when you learn new info about the user or their projects.`,
     });
   }
@@ -595,12 +595,15 @@ function buildEnvironmentContext(): string | null {
   return lines.join("\n");
 }
 
-function buildEvolutionContext(portalName: string): string {
+function buildEvolutionContext(portalName: string, config?: JinnConfig): string {
+  // If config says onboarded, skip onboarding mode regardless of profile content
+  const onboarded = config?.portal?.onboarded === true;
+
   const profilePath = path.join(JINN_HOME, "knowledge", "user-profile.md");
   let profileContent = "";
   try { profileContent = fs.readFileSync(profilePath, "utf-8").trim(); } catch {}
 
-  const isNew = profileContent.length < 50;
+  const isNew = !onboarded && profileContent.length < 50;
 
   const lines: string[] = [`## Self-evolution`];
 
