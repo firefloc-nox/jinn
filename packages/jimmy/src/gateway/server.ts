@@ -157,6 +157,8 @@ export async function startGateway(
   // Start connectors
   const connectors: Connector[] = [];
   const connectorMap = new Map<string, Connector>();
+  /** IDs of connectors created from config.connectors.instances[] (vs legacy top-level connectors) */
+  const instanceConnectorIds = new Set<string>();
 
   if (config.connectors?.slack?.appToken && config.connectors?.slack?.botToken) {
     try {
@@ -345,6 +347,7 @@ export async function startGateway(
         }
         connectors.push(connector);
         connectorMap.set(id, connector);
+        instanceConnectorIds.add(id);
         logger.info(`Connector instance "${id}" (type: ${type}, employee: ${employee || "default"}) started`);
       } catch (err) {
         logger.error(`Failed to start connector instance "${id}": ${err instanceof Error ? err.message : err}`);
@@ -353,6 +356,117 @@ export async function startGateway(
   }
 
   sessionManager.setConnectorProvider(() => connectorMap);
+
+  // Reload connector instances from config (stop old instances, start new ones)
+  async function reloadConnectorInstances(): Promise<{ started: string[]; stopped: string[]; errors: string[] }> {
+    const freshConfig = loadConfig();
+    const started: string[] = [];
+    const stopped: string[] = [];
+    const errors: string[] = [];
+
+    // Find instance-based connectors (keys that came from instances array)
+    const instanceIds = new Set<string>();
+    if (freshConfig.connectors?.instances) {
+      for (const inst of freshConfig.connectors.instances) {
+        if (inst.id) instanceIds.add(inst.id);
+      }
+    }
+
+    // Stop old instance connectors that are no longer in config or need refresh
+    for (const [id, connector] of connectorMap.entries()) {
+      // Skip legacy (top-level) connectors — only reload instance-based ones
+      if (!instanceConnectorIds.has(id)) continue;
+      try {
+        await connector.stop();
+        connectorMap.delete(id);
+        instanceConnectorIds.delete(id);
+        const idx = connectors.indexOf(connector);
+        if (idx >= 0) connectors.splice(idx, 1);
+        stopped.push(id);
+        logger.info(`Stopped connector instance "${id}" for reload`);
+      } catch (err) {
+        errors.push(`Failed to stop ${id}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    // Start new instances from fresh config
+    if (freshConfig.connectors?.instances) {
+      for (const instance of freshConfig.connectors.instances) {
+        const { id, type, employee, ...typeConfig } = instance;
+        if (!id || !type) continue;
+        if (connectorMap.has(id)) continue;
+
+        try {
+          let connector: Connector;
+          switch (type) {
+            case "discord": {
+              const discordConfig = { ...typeConfig, id } as DiscordConnectorConfig;
+              const discord = new DiscordConnector(discordConfig);
+              discord.onMessage((msg) => {
+                const routeOpts: RouteOptions = {};
+                if (employee) {
+                  const emp = employeeRegistry.get(employee);
+                  if (emp) routeOpts.employee = emp;
+                }
+                sessionManager.route(msg, discord, routeOpts).catch((err) => {
+                  logger.error(`${id} route error: ${err instanceof Error ? err.message : err}`);
+                });
+              });
+              await discord.start();
+              connector = discord;
+              break;
+            }
+            case "slack": {
+              const slackConfig = { ...typeConfig, id } as any;
+              const slack = new SlackConnector(slackConfig);
+              slack.onMessage((msg) => {
+                const routeOpts: RouteOptions = {};
+                if (employee) {
+                  const emp = employeeRegistry.get(employee);
+                  if (emp) routeOpts.employee = emp;
+                }
+                sessionManager.route(msg, slack, routeOpts).catch((err) => {
+                  logger.error(`${id} route error: ${err instanceof Error ? err.message : err}`);
+                });
+              });
+              await slack.start();
+              connector = slack;
+              break;
+            }
+            case "whatsapp": {
+              const whatsapp = new WhatsAppConnector({ ...typeConfig } as any);
+              whatsapp.onMessage((msg) => {
+                const routeOpts: RouteOptions = {};
+                if (employee) {
+                  const emp = employeeRegistry.get(employee);
+                  if (emp) routeOpts.employee = emp;
+                }
+                sessionManager.route(msg, whatsapp, routeOpts).catch((err) => {
+                  logger.error(`${id} route error: ${err instanceof Error ? err.message : err}`);
+                });
+              });
+              await whatsapp.start();
+              connector = whatsapp;
+              break;
+            }
+            default:
+              errors.push(`Unknown connector type "${type}" for instance "${id}"`);
+              continue;
+          }
+          connectors.push(connector);
+          connectorMap.set(id, connector);
+          instanceConnectorIds.add(id);
+          started.push(id);
+          logger.info(`Connector instance "${id}" (type: ${type}, employee: ${employee || "default"}) started`);
+        } catch (err) {
+          errors.push(`Failed to start "${id}": ${err instanceof Error ? err.message : err}`);
+          logger.error(`Failed to start connector instance "${id}": ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+
+    return { started, stopped, errors };
+  }
 
   // Start cron scheduler
   const cronJobs = loadJobs();
@@ -388,6 +502,7 @@ export async function startGateway(
     getConfig: () => currentConfig,
     emit,
     connectors: connectorMap,
+    reloadConnectorInstances,
   };
 
   // Replay any pending web queue items (e.g. gateway restart mid-run)

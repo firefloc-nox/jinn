@@ -102,6 +102,8 @@ export interface Connector {
   editMessage(target: Target, text: string): Promise<void>;
   setTypingStatus?(channelId: string, threadTs: string | undefined, status: string): Promise<void>;
   onMessage(handler: (msg: IncomingMessage) => void): void;
+  /** Return the bound employee name, if any */
+  getEmployee?(): string | undefined;
 }
 
 export interface IncomingMessage {
@@ -196,7 +198,7 @@ export interface Employee {
   name: string;
   displayName: string;
   department: string;
-  rank: "executive" | "manager" | "senior" | "employee";
+  rank: "executive" | "director" | "manager" | "lead" | "senior" | "employee";
   engine: string;
   model: string;
   persona: string;
@@ -210,12 +212,28 @@ export interface Employee {
   maxCostUsd?: number;
   /** Default effort level for sessions assigned to this employee */
   effortLevel?: string;
+  /** Whether to notify the parent session when this employee's child session completes. Default: true */
+  alwaysNotify?: boolean;
+  /** Relative path in the org tree, e.g. "nexamon-studio/design" */
+  orgPath?: string;
+  /** Name of the employee's direct manager (deduced from parent department.yaml) */
+  reportsTo?: string;
 }
 
 export interface Department {
   name: string;
   displayName: string;
-  description: string;
+  description?: string;
+  /** Name of the department manager (employee name) */
+  manager?: string;
+  /** Relative path in the org tree, e.g. "nexamon-studio/design" */
+  path: string;
+  /** Parent department path, e.g. "nexamon-studio" */
+  parent?: string;
+  /** Sub-department paths */
+  children: string[];
+  /** Direct employee names in this department */
+  employees: string[];
 }
 
 /** Stdio-based MCP server (spawned as child process) */
@@ -306,8 +324,8 @@ export interface WhatsAppConnectorConfig {
 export interface ConnectorInstance {
   /** Unique instance ID */
   id: string;
-  /** Connector type: "discord" | "slack" | "whatsapp" */
-  type: "discord" | "slack" | "whatsapp";
+  /** Connector type */
+  type: "discord" | "discord-remote" | "slack" | "whatsapp" | "telegram";
   /** Employee to bind to this connector */
   employee?: string;
   /** Type-specific configuration */
