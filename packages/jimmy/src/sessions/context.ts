@@ -221,6 +221,23 @@ export function buildContext(opts: {
     });
   }
 
+  // ── STANDARD: Memory Search Helper (all engines) ────────────
+  sections.push({
+    tier: Tier.STANDARD,
+    marker: "## Memory Search",
+    content: `## Memory Search Helper
+
+To search the knowledge base, make a POST request to:
+\`POST ${gatewayUrl}/api/sessions/${opts.sessionId}/memory-search\`
+Body: \`{ "query": "your search term" }\`
+
+Returns up to 10 matching files from \`~/.jinn/knowledge/\` and \`~/.jinn/docs/\` directories.
+Read files to get relevant context for better responses.
+
+This helper is available to all models (Claude, local, codex) without needing direct MCP access.`,
+    summary: `## Memory Search\nUse POST ${gatewayUrl}/api/sessions/${opts.sessionId}/memory-search to find knowledge files.`,
+  });
+
   // ── STANDARD: Gateway API reference ─────────────────────────
   if (isLocal) {
     // Compact API ref for local models

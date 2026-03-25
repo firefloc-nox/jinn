@@ -739,6 +739,51 @@ export async function handleApiRequest(
       return json(res, serializeSession(session, context), 201);
     }
 
+    // POST /api/sessions/:id/memory-search — search knowledge base
+    // Used by local models and other engines without direct MCP access
+    params = matchRoute("/api/sessions/:id/memory-search", pathname);
+    if (method === "POST" && params) {
+      const session = getSession(params.id);
+      if (!session) return notFound(res);
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const body = _parsed.body as any;
+      const query = body.query || "";
+      if (!query) return badRequest(res, "query is required");
+
+      // List knowledge files that match the query (case-insensitive)
+      const knowledgeDir = path.join(JINN_HOME, "knowledge");
+      const docsDir = path.join(JINN_HOME, "docs");
+      const results = [];
+
+      for (const dir of [knowledgeDir, docsDir]) {
+        if (!fs.existsSync(dir)) continue;
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (!file.endsWith(".md")) continue;
+          // Simple keyword matching
+          if (file.toLowerCase().includes(query.toLowerCase()) ||
+              file.toLowerCase().replace(/-|_/g, " ").includes(query.toLowerCase())) {
+            const filePath = path.join(dir, file);
+            const stat = fs.statSync(filePath);
+            results.push({
+              name: file,
+              path: filePath.replace(JINN_HOME, "~/.jinn"),
+              dir: dir === knowledgeDir ? "knowledge" : "docs",
+              size: stat.size,
+            });
+          }
+        }
+      }
+
+      return json(res, {
+        query,
+        results: results.slice(0, 10), // Limit to 10 results
+        hint: "Use 'cat <path>' or read the file with: fetch(gateway_url + '/api/files/<encoded_path>')",
+      });
+    }
+
     // POST /api/sessions/:id/message
     params = matchRoute("/api/sessions/:id/message", pathname);
     if (method === "POST" && params) {
