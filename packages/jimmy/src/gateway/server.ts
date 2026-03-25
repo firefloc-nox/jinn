@@ -632,7 +632,11 @@ export async function startGateway(
         apiContext.config = currentConfig;
         setActivityLimits(currentConfig);
 
-        // Hot-reload local engine registration
+        // Hot-reload local engine registration — kill active streams first
+        const oldLocal = engines.get("local");
+        if (oldLocal && "killAll" in oldLocal) {
+          (oldLocal as { killAll: () => void }).killAll();
+        }
         if (currentConfig.engines?.local?.url) {
           const localEngine = new LocalEngine(currentConfig.engines.local);
           engines.set("local", localEngine);
@@ -745,6 +749,11 @@ export async function startGateway(
     // Terminate live engine subprocesses after marking sessions.
     claudeEngine.killAll();
     codexEngine.killAll();
+    for (const [, eng] of engines) {
+      if ("killAll" in eng && eng !== claudeEngine && eng !== codexEngine) {
+        (eng as { killAll: () => void }).killAll();
+      }
+    }
 
     // Stop cron scheduler
     stopScheduler();

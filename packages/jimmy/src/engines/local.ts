@@ -73,7 +73,7 @@ export class LocalEngine implements InterruptibleEngine {
 
     // Retry logic for JIT model loading — LM Studio/Ollama may terminate
     // the first SSE connection while loading the model into memory.
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 3;
     let lastError: string | undefined;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -85,11 +85,15 @@ export class LocalEngine implements InterruptibleEngine {
 
       try {
         if (attempt > 0) {
-          const delayMs = attempt * 5000; // 5s, 10s — give JIT loading time
+          const delayMs = 5000 * Math.pow(2, attempt - 1); // 5s, 10s, 20s — exponential backoff
           logger.info(`[local] Retry ${attempt}/${MAX_RETRIES} for session ${sessionId} (model JIT loading, waiting ${delayMs / 1000}s)`);
           opts.onStream?.({ type: "status", content: "Waiting for model to load..." });
           await new Promise((r) => setTimeout(r, delayMs));
         }
+
+        // Timeout after 5 minutes to avoid hanging on unresponsive servers
+        const timeoutSignal = AbortSignal.timeout(300_000);
+        const combinedSignal = AbortSignal.any([controller.signal, timeoutSignal]);
 
         const response = await fetch(`${this.url}/v1/chat/completions`, {
           method: "POST",
@@ -99,7 +103,7 @@ export class LocalEngine implements InterruptibleEngine {
             messages,
             stream: true,
           }),
-          signal: controller.signal,
+          signal: combinedSignal,
         });
 
         if (!response.ok) {
@@ -197,6 +201,22 @@ export class LocalEngine implements InterruptibleEngine {
           }
         }
 
+        // Process any remaining data in the buffer after stream ends
+        if (buffer.trim() && buffer.trim().startsWith("data: ") && buffer.trim() !== "data: [DONE]") {
+          const jsonStr = buffer.trim().slice(6);
+          try {
+            const parsed = JSON.parse(jsonStr) as SSEChunk;
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.reasoning_content) reasoningText += delta.reasoning_content;
+            if (delta?.content) {
+              fullText += delta.content;
+              opts.onStream?.({ type: "text", content: delta.content });
+            }
+          } catch {
+            // Skip malformed trailing data
+          }
+        }
+
         // If no content was emitted but we have reasoning, use it as the response.
         // Models like vibethinker put everything in reasoning_content.
         if (!fullText.trim() && reasoningText.trim()) {
@@ -206,7 +226,7 @@ export class LocalEngine implements InterruptibleEngine {
         }
 
         // Strip control tokens from output (e.g. <|im_end|>, <|endoftext|>)
-        fullText = fullText.replace(/<\|[a-z_]+\|>/g, "").trim();
+        fullText = fullText.replace(/<\|[a-zA-Z0-9_]+\|>/g, "").trim();
 
         // Empty response with no error = model not ready (JIT loading returned empty stream)
         if (!fullText && attempt < MAX_RETRIES) {
