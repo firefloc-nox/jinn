@@ -936,7 +936,7 @@ export async function handleApiRequest(
           name: dept.name,
           displayName: dept.displayName,
           description: dept.description,
-          path: dept.path,
+          path: dept.path || dept.name,
           manager: managerEmp
             ? { name: managerEmp.name, displayName: managerEmp.displayName, rank: managerEmp.rank }
             : dept.manager ? { name: dept.manager, displayName: dept.manager, rank: "unknown" } : null,

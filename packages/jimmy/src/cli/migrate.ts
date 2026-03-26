@@ -167,10 +167,15 @@ export async function runMigrate(opts: { check?: boolean; auto?: boolean }): Pro
       `Clean up the migrations/ directory when done.`,
     ].join("\n");
 
-    execFileSync(engineConfig.bin, ["-p", prompt], {
-      stdio: "inherit",
-      cwd: JINN_HOME,
-    });
+    if ("bin" in engineConfig) {
+      execFileSync(engineConfig.bin, ["-p", prompt], {
+        stdio: "inherit",
+        cwd: JINN_HOME,
+      });
+    } else {
+      console.error("Migration requires Claude or Codex engine (not local)");
+      process.exit(1);
+    }
 
     console.log(`\n${GREEN}Migration complete.${RESET}\n`);
   } catch (err: any) {
