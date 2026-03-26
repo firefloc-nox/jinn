@@ -238,7 +238,7 @@ export interface Department {
   /** Services provided by this department */
   provides: string[];
   /** Full path in organization (e.g., "nexamon/dev") */
-  path?: string;
+  path: string;
 }
 
 /** Stdio-based MCP server (spawned as child process) */
