@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1] - 2026-03-26
+
+### 🐛 Bug Fixes
+- **Config v2 compat** — `logging` section now has graceful defaults; v2 configs without `logging:` no longer crash the gateway at startup
+- **Session title sanitization** — Strip XML/HTML tags (`<system>`, `<system-reminder>`, etc.) from auto-generated and user-set session titles to prevent prompt leakage in the UI
+
+### 📝 Breaking Change Notes (v3 Design Decisions)
+- **`/api/connectors/reload`** — Formerly `/api/connectors/discord/reload` (per-connector). Now a global endpoint that restarts all connector instances. This is intentional: v3 supports multiple connector types (Discord, Slack, Telegram, WhatsApp) and named instances.
+- **`/api/kanban/boards` removed** — v3 uses a single-board kanban model. Use `/api/kanban/config` for board configuration and `/api/kanban/topics` for topic management. The multi-board endpoints (`GET/POST /api/kanban/boards`, `GET /api/org/boards`) are replaced by this design.
+
 ## [0.7.0] - 2026-03-19
 
 ### ✨ Features — Project Phoenix

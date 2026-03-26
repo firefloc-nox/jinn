@@ -365,10 +365,9 @@ export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
   engines: {
-    default: "claude" | "codex" | "gemini" | "local";
+    default: "claude" | "codex";
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
-    gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     local?: { bin?: string; model?: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
@@ -380,7 +379,7 @@ export interface JinnConfig {
     /** Named connector instances — allows multiple connectors of the same type */
     instances?: ConnectorInstance[];
   };
-  logging: { file: boolean; stdout: boolean; level: string };
+  logging?: { file?: boolean; stdout?: boolean; level?: string };
   mcp?: McpGlobalConfig;
   sessions?: {
     maxDurationMinutes?: number;

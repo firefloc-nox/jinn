@@ -12,7 +12,9 @@ export default (phase: string): NextConfig => {
       { source: "/ws", destination: "http://127.0.0.1:7778/ws" },
     ];
   } else {
-    config.output = "export";
+    // static export disabled — causes "Unexpected response from worker" crash in Next 15.5
+    // TODO: re-enable once Next.js fixes the worker crash
+    // config.output = "export";
   }
 
   return config;

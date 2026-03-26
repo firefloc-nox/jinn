@@ -3,6 +3,8 @@ import yaml from "js-yaml";
 import { CONFIG_PATH } from "./paths.js";
 import type { JinnConfig } from "./types.js";
 
+const LOGGING_DEFAULTS = { file: true, stdout: true, level: "info" } as const;
+
 export function loadConfig(): JinnConfig {
   if (!fs.existsSync(CONFIG_PATH)) {
     throw new Error(
@@ -10,5 +12,10 @@ export function loadConfig(): JinnConfig {
     );
   }
   const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-  return yaml.load(raw) as JinnConfig;
+  const config = yaml.load(raw) as JinnConfig;
+
+  // Graceful defaults for v2 configs missing the logging section
+  config.logging = { ...LOGGING_DEFAULTS, ...config.logging };
+
+  return config;
 }

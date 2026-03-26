@@ -97,11 +97,11 @@ export async function startGateway(
 ): Promise<GatewayCleanup> {
   const bootId = randomUUID().slice(0, 8);
 
-  // Configure logging
+  // Configure logging (defaults applied by loadConfig for v2 compat)
   configureLogger({
-    level: config.logging.level,
-    stdout: config.logging.stdout,
-    file: config.logging.file,
+    level: config.logging?.level ?? "info",
+    stdout: config.logging?.stdout ?? true,
+    file: config.logging?.file ?? true,
   });
 
   const gatewayName = config.portal?.portalName || "Jinn";

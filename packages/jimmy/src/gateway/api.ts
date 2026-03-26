@@ -371,7 +371,6 @@ export async function handleApiRequest(
           default: config.engines.default,
           claude: { model: config.engines.claude.model, available: true },
           codex: { model: config.engines.codex.model, available: true },
-          ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
@@ -445,7 +444,7 @@ export async function handleApiRequest(
       const updates: UpdateSessionFields = {};
       if (body.title !== undefined) {
         if (typeof body.title !== "string") return badRequest(res, "title must be a string");
-        const trimmed = body.title.trim();
+        const trimmed = body.title.replace(/<[^>]*>/g, "").trim();
         if (!trimmed) return badRequest(res, "title must not be empty");
         updates.title = trimmed.slice(0, 200);
       }
@@ -2331,9 +2330,7 @@ async function runWebSession(
 
     const engineConfig = currentSession.engine === "codex"
       ? config.engines.codex
-      : currentSession.engine === "gemini"
-        ? config.engines.gemini ?? config.engines.claude
-        : config.engines.claude;
+      : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     let lastHeartbeatAt = 0;

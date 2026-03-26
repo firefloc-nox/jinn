@@ -230,7 +230,12 @@ function getNextSessionNumber(): number {
 function generateTitle(prompt?: string): string {
   const num = getNextSessionNumber();
   if (!prompt) return `#${num}`;
-  const cleaned = prompt.replace(/\n/g, ' ').replace(/@\w+/g, '').replace(/\s+/g, ' ').trim();
+  const cleaned = prompt
+    .replace(/<[^>]*>/g, '')       // Strip XML/HTML tags
+    .replace(/\n/g, ' ')
+    .replace(/@\w+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!cleaned) return `#${num}`;
   const summary = cleaned.slice(0, 30).trim();
   return `#${num} - ${summary}${cleaned.length > 30 ? '...' : ''}`;

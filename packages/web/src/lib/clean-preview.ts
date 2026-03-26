@@ -4,6 +4,8 @@
  */
 export function cleanPreview(raw: string): string {
   let text = raw
+  // Strip XML/HTML tags (e.g. <system>, <system-reminder>)
+  text = text.replace(/<[^>]*>/g, "")
   // Strip @employee-name mentions
   text = text.replace(/@[\w-]+/g, "")
   // Strip #NNN session number prefixes
