@@ -966,7 +966,7 @@ export async function handleApiRequest(
       // Also include unassigned employees (orgPath undefined or not matching any dept)
       const assignedEmployees = new Set<string>();
       for (const dept of deptMap.values()) {
-        for (const eName of dept.employees) assignedEmployees.add(eName);
+        for (const eName of dept.employees ?? []) assignedEmployees.add(eName);
       }
       const unassigned = Array.from(empMap.values())
         .filter((emp) => !assignedEmployees.has(emp.name))
