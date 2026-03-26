@@ -940,7 +940,7 @@ export async function handleApiRequest(
           manager: managerEmp
             ? { name: managerEmp.name, displayName: managerEmp.displayName, rank: managerEmp.rank }
             : dept.manager ? { name: dept.manager, displayName: dept.manager, rank: "unknown" } : null,
-          employees: dept.employees
+          employees: (dept.employees ?? [])
             .filter((eName) => eName !== dept.manager) // manager listed separately
             .map((eName) => {
               const emp = empMap.get(eName);
@@ -948,7 +948,7 @@ export async function handleApiRequest(
                 ? { name: emp.name, displayName: emp.displayName, rank: emp.rank }
                 : { name: eName, displayName: eName, rank: "unknown" };
             }),
-          children: dept.children
+          children: (dept.children ?? [])
             .map((childPath) => buildNode(childPath))
             .filter((n): n is DeptNode => n !== null),
         };
