@@ -2,6 +2,16 @@
 
 export type TicketStatus = string // Dynamic — driven by KanbanConfig.columns
 
+// Status aliases for display
+export const STATUS_ALIASES: Record<string, string> = {
+  'todo': 'To Do',
+  'in_progress': 'In Progress',
+  'in-progress': 'In Progress',
+  'done': 'Done',
+  'backlog': 'Backlog',
+  'blocked': 'Blocked',
+}
+
 export type TicketPriority = 'low' | 'medium' | 'high'
 
 export type WorkState = 'idle' | 'starting' | 'working' | 'done' | 'failed'

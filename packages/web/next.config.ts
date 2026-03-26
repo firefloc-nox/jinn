@@ -12,7 +12,7 @@ export default (phase: string): NextConfig => {
       { source: "/ws", destination: "http://127.0.0.1:7778/ws" },
     ];
   } else {
-    config.output = "export";
+    // config.output = "export"; // Disabled for dynamic features
   }
 
   return config;
