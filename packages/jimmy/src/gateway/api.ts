@@ -40,7 +40,7 @@ import { logger } from "../shared/logger.js";
 import { getSttStatus, downloadModel, transcribe as sttTranscribe, resolveLanguages, WHISPER_LANGUAGES } from "../stt/stt.js";
 import { JINN_HOME } from "../shared/paths.js";
 import { resolveEffort } from "../shared/effort.js";
-import { computeNextRetryDelayMs, computeRateLimitDeadlineMs, detectRateLimit } from "../shared/rateLimit.js";
+import { computeNextRetryDelayMs, computeRateLimitDeadlineMs, detectRateLimit, isDeadSessionError } from "../shared/rateLimit.js";
 import { getClaudeExpectedResetAt, recordClaudeRateLimit } from "../shared/usageAwareness.js";
 import { loadJobs, saveJobs } from "../cron/jobs.js";
 import { reloadScheduler } from "../cron/scheduler.js";
@@ -50,6 +50,8 @@ import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
 import { loadInstances } from "../cli/instances.js";
+import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
+import { checkBudget } from "./budgets.js";
 
 export interface ApiContext {
   config: JinnConfig;
@@ -1865,6 +1867,8 @@ async function runWebSession(
     employee = findEmployee(currentSession.employee, registry);
   }
 
+  let mcpConfigPath: string | undefined;
+
   try {
 
     const systemPrompt = buildContext({
@@ -1883,6 +1887,37 @@ async function runWebSession(
         ? config.engines.gemini ?? config.engines.claude
         : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
+
+    // Budget enforcement — check BEFORE engine.run()
+    if (currentSession.employee) {
+      const budgetConfig = (config as any).budgets?.employees as Record<string, number> | undefined;
+      if (budgetConfig && currentSession.employee in budgetConfig) {
+        const budgetStatus = checkBudget(currentSession.employee, budgetConfig);
+        if (budgetStatus === 'paused') {
+          logger.warn(`Web session ${currentSession.id} blocked: employee "${currentSession.employee}" has exceeded their budget`);
+          const pausedMsg = `Budget limit exceeded for employee "${currentSession.employee}". Session blocked.`;
+          updateSession(currentSession.id, {
+            status: 'error',
+            lastActivity: new Date().toISOString(),
+            lastError: pausedMsg,
+          });
+          context.emit("session:completed", {
+            sessionId: currentSession.id,
+            result: null,
+            error: pausedMsg,
+          });
+          return;
+        }
+      }
+    }
+
+    // Resolve MCP servers for Claude engine sessions
+    if (currentSession.engine === "claude") {
+      const mcpConfig = resolveMcpServers(config.mcp, employee);
+      if (Object.keys(mcpConfig.mcpServers).length > 0) {
+        mcpConfigPath = writeMcpConfigFile(mcpConfig, currentSession.id);
+      }
+    }
 
     let lastHeartbeatAt = 0;
     const runHeartbeat = setInterval(() => {
@@ -1914,6 +1949,7 @@ async function runWebSession(
       model: currentSession.model ?? engineConfig.model,
       effortLevel,
       cliFlags: employee?.cliFlags,
+      mcpConfigPath,
       attachments: attachments?.length ? attachments : undefined,
       sessionId: currentSession.id,
       onStream: (delta) => {
@@ -1946,7 +1982,22 @@ async function runWebSession(
     }
 
     const wasInterrupted = result.error?.startsWith("Interrupted");
-    const rateLimit = !wasInterrupted ? detectRateLimit(result) : { limited: false as const };
+
+    // Dead session detection: if the engine session ID is stale (expired/invalid),
+    // clear cached engine sessions so the next attempt starts fresh.
+    const isDead = !wasInterrupted && isDeadSessionError(result);
+    if (isDead) {
+      logger.warn(`Dead session detected for ${currentSession.id} — clearing stale engine IDs`);
+      const meta = { ...(currentSession.transportMeta || {}) } as Record<string, unknown>;
+      delete meta["engineSessions"];
+      delete meta["engineOverride"];
+      updateSession(currentSession.id, {
+        engineSessionId: null,
+        transportMeta: meta as any,
+      });
+    }
+
+    const rateLimit = (!wasInterrupted && !isDead) ? detectRateLimit(result) : { limited: false as const };
 
     if (rateLimit.limited) {
       recordClaudeRateLimit(rateLimit.resetsAt);
@@ -2142,6 +2193,7 @@ async function runWebSession(
             model: current.model ?? engineConfig.model,
             effortLevel,
             cliFlags: employee?.cliFlags,
+            mcpConfigPath,
             sessionId: currentSession.id,
             onStream: (delta) => {
               context.emit("session:delta", {
@@ -2291,5 +2343,7 @@ async function runWebSession(
       error: errMsg,
     });
     logger.error(`Web session ${currentSession.id} error: ${errMsg}`);
+  } finally {
+    if (mcpConfigPath) cleanupMcpConfigFile(currentSession.id);
   }
 }
