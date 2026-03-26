@@ -253,9 +253,7 @@ export class SessionManager {
 
       const engineConfig = session.engine === "codex"
         ? this.config.engines.codex
-        : session.engine === "gemini"
-          ? this.config.engines.gemini ?? this.config.engines.claude
-          : this.config.engines.claude;
+        : this.config.engines.claude;
       if (session.engine === "claude") {
         const mcpConfig = resolveMcpServers(this.config.mcp, employee);
         const mcpServerNames = Object.keys(mcpConfig.mcpServers);

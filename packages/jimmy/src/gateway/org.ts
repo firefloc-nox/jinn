@@ -103,7 +103,7 @@ export function scanOrgFull(): OrgScanResult {
             parent,
             children: [],
             employees: [],
-            provides: Array.isArray(data?.provides) ? data.provides : undefined,
+            provides: Array.isArray(data?.provides) ? data.provides : [],
           };
           departments.set(relPath, dept);
         } catch (err) {
@@ -119,7 +119,8 @@ export function scanOrgFull(): OrgScanResult {
   for (const [deptPath, dept] of departments) {
     if (dept.parent && departments.has(dept.parent)) {
       const parentDept = departments.get(dept.parent)!;
-      if (!parentDept.children.includes(deptPath)) {
+      if (!parentDept.children?.includes(deptPath)) {
+        parentDept.children = parentDept.children || [];
         parentDept.children.push(deptPath);
       }
     }
@@ -130,6 +131,7 @@ export function scanOrgFull(): OrgScanResult {
     const orgPath = employee.orgPath;
     if (orgPath && departments.has(orgPath)) {
       const dept = departments.get(orgPath)!;
+      dept.employees = dept.employees || [];
       dept.employees.push(employee.name);
 
       // Set reportsTo from the department's manager field
