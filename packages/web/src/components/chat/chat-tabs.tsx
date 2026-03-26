@@ -142,9 +142,11 @@ export function ChatTabBar({ tabs, activeIndex, onSwitch, onClose, onNew, onPin,
       </button>
 
       {toolbarActions && (
-        <div className="hidden shrink-0 items-center gap-2 border-l border-border px-3 lg:flex">
+        <div className="shrink-0 items-center gap-2 border-l border-border px-3 flex lg:gap-3">
           {toolbarActions}
-          <NotificationBell />
+          <div className="hidden lg:flex">
+            <NotificationBell />
+          </div>
         </div>
       )}
     </div>
