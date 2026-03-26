@@ -29,6 +29,8 @@ export interface Employee {
   persona: string;
   emoji?: string;
   alwaysNotify?: boolean;
+  orgPath?: string;
+  reportsTo?: string;
 }
 
 export interface OrgData {

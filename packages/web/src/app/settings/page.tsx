@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react"
 import { RotateCcw, Trash2, Check, Save, Loader2 } from "lucide-react"
 import { PageLayout } from "@/components/page-layout"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { useSettings } from "@/app/settings-provider"
 import { useBreadcrumbs } from "@/context/breadcrumb-context"
 import { useTheme } from "@/app/providers"
@@ -459,6 +468,10 @@ export default function SettingsPage() {
 
   // Employees list for instance binding
   const [employees, setEmployees] = useState<Array<{name: string, displayName: string}>>([])
+
+  // Confirm dialogs (replacing blocking window.confirm / alert)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [reloadStatus, setReloadStatus] = useState<string | null>(null)
 
   useEffect(() => {
     api.getOrg().then((org: any) => {
@@ -1214,10 +1227,11 @@ export default function SettingsPage() {
                           if (result.stopped.length) parts.push(`Stopped: ${result.stopped.join(", ")}`)
                           if (result.started.length) parts.push(`Started: ${result.started.join(", ")}`)
                           if (result.errors.length) parts.push(`Errors: ${result.errors.join(", ")}`)
-                          alert(parts.length ? parts.join("\n") : "No connector instances to reload")
+                          setReloadStatus(parts.length ? parts.join(" · ") : "No connector instances to reload")
                         } catch {
-                          alert("Failed to reload connectors")
+                          setReloadStatus("Failed to reload connectors")
                         }
+                        setTimeout(() => setReloadStatus(null), 4000)
                       }}
                     >
                       <RotateCcw size={12} />
@@ -1236,6 +1250,11 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </div>
+                {reloadStatus && (
+                  <div className="text-[length:var(--text-caption2)] text-[var(--accent)] mb-[var(--space-2)] animate-in fade-in">
+                    {reloadStatus}
+                  </div>
+                )}
                 <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
                   Add multiple connector instances of the same type, each bound to a specific employee.
                 </div>
@@ -1534,16 +1553,7 @@ export default function SettingsPage() {
                 Re-run Onboarding Wizard
               </button>
               <button
-                onClick={() => {
-                  if (
-                    window.confirm("Reset all settings to defaults?")
-                  ) {
-                    localStorage.removeItem("jinn-settings")
-                    localStorage.removeItem("jinn-theme")
-                    resetAll()
-                    window.location.reload()
-                  }
-                }}
+                onClick={() => setConfirmReset(true)}
                 className="px-[var(--space-5)] py-[var(--space-2)] rounded-[var(--radius-md)] bg-[var(--system-red)] text-white border-none cursor-pointer text-[length:var(--text-footnote)] font-[var(--weight-semibold)] transition-all duration-150 ease-[var(--ease-spring)] inline-flex items-center gap-[var(--space-2)]"
               >
                 <Trash2 size={14} />
@@ -1553,6 +1563,28 @@ export default function SettingsPage() {
           </Section>
         </div>
       </div>
+
+      <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <DialogContent showCloseButton={false} className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reset All Settings?</DialogTitle>
+            <DialogDescription>
+              This will reset all settings to their defaults and reload the page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmReset(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => {
+              localStorage.removeItem("jinn-settings")
+              localStorage.removeItem("jinn-theme")
+              resetAll()
+              window.location.reload()
+            }}>
+              Reset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   )
 }

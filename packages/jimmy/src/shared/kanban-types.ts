@@ -173,6 +173,16 @@ export interface ConfigSaveResult {
 // Default config — generated on first boot
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Legacy status aliases — maps old names to canonical column IDs */
+export const STATUS_ALIASES: Record<string, string> = {
+  'todo':        'backlog',
+  'in-progress': 'dev',
+  'in_progress': 'dev',
+  'review':      'dev-review',
+  'testing':     'test',
+  'completed':   'done',
+};
+
 export const DEFAULT_KANBAN_CONFIG: KanbanConfig = {
   version: "1.0",
   columns: [

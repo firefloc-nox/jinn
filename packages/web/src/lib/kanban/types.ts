@@ -88,6 +88,16 @@ export const DEFAULT_CONFIG: KanbanConfig = {
 // Backward-compat alias — components not yet migrated to dynamic config
 export const COLUMNS: KanbanColumn[] = DEFAULT_CONFIG.columns
 
+/** Legacy status aliases — maps old names to canonical column IDs */
+export const STATUS_ALIASES: Record<string, string> = {
+  'todo':        'backlog',
+  'in-progress': 'dev',
+  'in_progress': 'dev',
+  'review':      'dev-review',
+  'testing':     'test',
+  'completed':   'done',
+}
+
 export const PRIORITY_COLORS: Record<TicketPriority, string> = {
   low:    'var(--system-green)',
   medium: 'var(--system-orange)',

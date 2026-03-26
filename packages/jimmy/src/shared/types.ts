@@ -1,10 +1,18 @@
-export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error";
+export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error" | "thinking";
 
 export interface StreamDelta {
   type: StreamDeltaType;
   content: string;
   toolName?: string;
   toolId?: string;
+  /** Tool arguments (for tool_use deltas) */
+  toolArgs?: Record<string, unknown>;
+  /** Tool result content (for tool_result deltas) */
+  resultContent?: string;
+  /** Thinking text (for thinking deltas) */
+  thinkingText?: string;
+  /** Unix timestamp in milliseconds */
+  timestamp?: number;
 }
 
 export interface Engine {
@@ -234,6 +242,8 @@ export interface Department {
   children: string[];
   /** Direct employee names in this department */
   employees: string[];
+  /** Cross-department services this department provides */
+  provides?: string[];
 }
 
 /** Stdio-based MCP server (spawned as child process) */
@@ -321,6 +331,18 @@ export interface WhatsAppConnectorConfig {
   ignoreOldMessagesOnBoot?: boolean;
 }
 
+export interface TelegramConnectorConfig {
+  /** Unique instance identifier (e.g. "telegram-main") */
+  id?: string;
+  /** Employee to handle messages from this connector instance */
+  employee?: string;
+  /** Telegram bot token from @BotFather */
+  botToken: string;
+  /** Allowed Telegram user IDs — empty = allow all */
+  allowFrom?: number[];
+  ignoreOldMessagesOnBoot?: boolean;
+}
+
 export interface ConnectorInstance {
   /** Unique instance ID */
   id: string;
@@ -336,21 +358,25 @@ export interface PortalConfig {
   portalName?: string;
   operatorName?: string;
   language?: string;
+  onboarded?: boolean;
 }
 
 export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
   engines: {
-    default: "claude" | "codex";
+    default: "claude" | "codex" | "gemini" | "local";
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    local?: { bin?: string; model?: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;
     slack?: SlackConnectorConfig;
     discord?: DiscordConnectorConfig;
     whatsapp?: WhatsAppConnectorConfig;
+    telegram?: TelegramConnectorConfig;
     /** Named connector instances — allows multiple connectors of the same type */
     instances?: ConnectorInstance[];
   };

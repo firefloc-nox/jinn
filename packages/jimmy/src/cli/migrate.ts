@@ -152,7 +152,10 @@ export async function runMigrate(opts: { check?: boolean; auto?: boolean }): Pro
   console.log(`\nLaunching AI to apply ${pending.length} migration(s)...\n`);
 
   const config = loadConfig();
-  const engineConfig = config.engines[config.engines.default] ?? config.engines.claude;
+  const engineName = config.engines.default;
+  const engineConfig = (engineName === "claude" || engineName === "codex"
+    ? config.engines[engineName]
+    : config.engines.gemini ?? config.engines.claude) as { bin: string; model: string };
 
   try {
     const prompt = [
