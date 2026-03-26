@@ -1,10 +1,14 @@
-export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error";
+export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error" | "thinking";
 
 export interface StreamDelta {
   type: StreamDeltaType;
   content: string;
   toolName?: string;
   toolId?: string;
+  toolArgs?: Record<string, unknown>;
+  timestamp?: number;
+  thinkingText?: string;
+  resultContent?: string;
 }
 
 export interface Engine {
@@ -102,6 +106,7 @@ export interface Connector {
   editMessage(target: Target, text: string): Promise<void>;
   setTypingStatus?(channelId: string, threadTs: string | undefined, status: string): Promise<void>;
   onMessage(handler: (msg: IncomingMessage) => void): void;
+  getEmployee?(): string | undefined;
 }
 
 export interface IncomingMessage {
@@ -210,12 +215,30 @@ export interface Employee {
   maxCostUsd?: number;
   /** Default effort level for sessions assigned to this employee */
   effortLevel?: string;
+  /** Organizational hierarchy path (e.g., "executive/nexamon/dev") */
+  orgPath?: string;
+  /** Direct manager (department or employee) */
+  reportsTo?: string;
+  /** Always notify this employee of events */
+  alwaysNotify?: boolean;
 }
 
 export interface Department {
   name: string;
   displayName: string;
   description: string;
+  /** Manager of this department (employee name) */
+  manager?: string;
+  /** Parent department */
+  parent?: string;
+  /** Sub-departments */
+  children?: string[];
+  /** Employees in this department */
+  employees?: string[];
+  /** Services provided by this department */
+  provides?: string[];
+  /** Full path in organization (e.g., "nexamon/dev") */
+  path?: string;
 }
 
 /** Stdio-based MCP server (spawned as child process) */
@@ -303,6 +326,18 @@ export interface WhatsAppConnectorConfig {
   ignoreOldMessagesOnBoot?: boolean;
 }
 
+export interface TelegramConnectorConfig {
+  /** Unique instance identifier (e.g. "telegram-main") */
+  id?: string;
+  /** Employee to handle messages from this connector instance */
+  employee?: string;
+  /** Telegram bot token */
+  botToken: string;
+  /** Allowed chat IDs — empty = allow all */
+  allowFrom?: number[];
+  ignoreOldMessagesOnBoot?: boolean;
+}
+
 export interface ConnectorInstance {
   /** Unique instance ID */
   id: string;
@@ -318,15 +353,19 @@ export interface PortalConfig {
   portalName?: string;
   operatorName?: string;
   language?: string;
+  /** Skip onboarding wizard on first launch */
+  onboarded?: boolean;
 }
 
 export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
   engines: {
-    default: "claude" | "codex";
+    default: "claude" | "codex" | "gemini" | "local";
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    local?: { url: string; model: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;

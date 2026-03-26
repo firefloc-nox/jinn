@@ -228,3 +228,29 @@ export const DEFAULT_KANBAN_CONFIG: KanbanConfig = {
     fallbackAssignee: null,
   },
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Status aliases — map common names to column IDs
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const STATUS_ALIASES: Record<string, string> = {
+  // Common aliases
+  "backlog": "backlog",
+  "queue": "backlog",
+  "pending": "backlog",
+  "todo": "todo",
+  "ready": "todo",
+  "scheduled": "todo",
+  "in-progress": "in-progress",
+  "working": "in-progress",
+  "started": "in-progress",
+  "in-progress": "in-progress",
+  "review": "review",
+  "reviewing": "review",
+  "pr": "review",
+  "code-review": "review",
+  "done": "done",
+  "completed": "done",
+  "closed": "done",
+  "finished": "done",
+};
