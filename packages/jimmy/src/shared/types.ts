@@ -361,9 +361,10 @@ export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
   engines: {
-    default: "claude" | "codex";
+    default: "claude" | "codex" | "local";
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    local?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;
