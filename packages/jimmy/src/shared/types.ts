@@ -232,11 +232,11 @@ export interface Department {
   /** Parent department */
   parent?: string;
   /** Sub-departments */
-  children?: string[];
+  children: string[];
   /** Employees in this department */
-  employees?: string[];
+  employees: string[];
   /** Services provided by this department */
-  provides?: string[];
+  provides: string[];
   /** Full path in organization (e.g., "nexamon/dev") */
   path?: string;
 }

@@ -244,7 +244,6 @@ export const STATUS_ALIASES: Record<string, string> = {
   "in-progress": "in-progress",
   "working": "in-progress",
   "started": "in-progress",
-  "in-progress": "in-progress",
   "review": "review",
   "reviewing": "review",
   "pr": "review",
