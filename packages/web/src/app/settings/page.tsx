@@ -48,6 +48,8 @@ interface Config {
     default?: string
     claude?: { bin?: string; model?: string; effortLevel?: string }
     codex?: { bin?: string; model?: string; effortLevel?: string }
+    gemini?: { bin?: string; model?: string; effortLevel?: string }
+    local?: { bin?: string; model?: string; maxContextChars?: number }
   }
   sessions?: {
     maxDurationMinutes?: number
@@ -100,6 +102,8 @@ interface Config {
   portal?: {
     portalName?: string
     operatorName?: string
+    language?: string
+    onboarded?: boolean
   }
   [key: string]: unknown
 }
@@ -895,6 +899,8 @@ export default function SettingsPage() {
                     options={[
                       { value: "claude", label: "Claude" },
                       { value: "codex", label: "Codex" },
+                      { value: "gemini", label: "Gemini" },
+                      { value: "local", label: "Local" },
                     ]}
                   />
                 </FieldRow>
@@ -990,6 +996,48 @@ export default function SettingsPage() {
                       { value: "medium", label: "Medium" },
                       { value: "high", label: "High" },
                       { value: "xhigh", label: "Extra High" },
+                    ]}
+                  />
+                </FieldRow>
+
+                <div
+                  className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]"
+                />
+
+                <div
+                  className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]"
+                >
+                  Gemini
+                </div>
+                <FieldRow label="Binary Path">
+                  <SettingsInput
+                    value={config.engines?.gemini?.bin ?? ""}
+                    onChange={(v) =>
+                      updateConfig(["engines", "gemini", "bin"], v)
+                    }
+                    placeholder="gemini"
+                  />
+                </FieldRow>
+                <FieldRow label="Model">
+                  <SettingsInput
+                    value={config.engines?.gemini?.model ?? ""}
+                    onChange={(v) =>
+                      updateConfig(["engines", "gemini", "model"], v)
+                    }
+                    placeholder="gemini-2.5-pro"
+                  />
+                </FieldRow>
+                <FieldRow label="Effort Level">
+                  <SettingsSelect
+                    value={config.engines?.gemini?.effortLevel ?? "default"}
+                    onChange={(v) =>
+                      updateConfig(["engines", "gemini", "effortLevel"], v)
+                    }
+                    options={[
+                      { value: "default", label: "Default" },
+                      { value: "low", label: "Low" },
+                      { value: "medium", label: "Medium" },
+                      { value: "high", label: "High" },
                     ]}
                   />
                 </FieldRow>

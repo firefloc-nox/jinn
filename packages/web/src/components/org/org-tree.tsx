@@ -1,13 +1,6 @@
 "use client";
 import React, { useState } from "react";
-
-interface Employee {
-  name: string;
-  displayName?: string;
-  rank?: string;
-  engine?: string;
-  department?: string;
-}
+import type { Employee } from "@/lib/api";
 
 interface OrgData {
   departments: string[];

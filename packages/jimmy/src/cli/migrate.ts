@@ -155,7 +155,7 @@ export async function runMigrate(opts: { check?: boolean; auto?: boolean }): Pro
   const engineName = config.engines.default;
   const engineConfig = (engineName === "claude" || engineName === "codex"
     ? config.engines[engineName]
-    : config.engines.gemini ?? config.engines.claude) as { bin: string; model: string };
+    : config.engines.claude) as { bin: string; model: string };
 
   try {
     const prompt = [

@@ -33,6 +33,18 @@ export interface Employee {
   reportsTo?: string;
 }
 
+export interface Department {
+  name: string;
+  displayName: string;
+  description?: string;
+  manager?: string;
+  path: string;
+  parent?: string;
+  children: string[];
+  employees: string[];
+  provides?: string[];
+}
+
 export interface OrgData {
   departments: string[];
   employees: string[];

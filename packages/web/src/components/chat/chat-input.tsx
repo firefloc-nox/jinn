@@ -7,14 +7,7 @@ import { useStt } from '@/hooks/use-stt'
 import { SttDownloadModal } from './stt-download-modal'
 import { SttWaveform } from './stt-waveform'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
-
-interface Employee {
-  name: string
-  displayName?: string
-  department?: string
-  rank?: string
-  engine?: string
-}
+import type { Employee } from '@/lib/api'
 
 interface SlashCommand {
   name: string
