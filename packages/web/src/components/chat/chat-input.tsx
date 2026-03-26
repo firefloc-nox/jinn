@@ -170,7 +170,15 @@ export function ChatInput({
           emps.map(async (name: string) => {
             try {
               const emp = await api.getEmployee(name)
-              return { name: emp.name, displayName: emp.displayName, department: emp.department, rank: emp.rank, engine: emp.engine }
+              return {
+                name: emp.name,
+                displayName: emp.displayName,
+                department: emp.department,
+                rank: emp.rank,
+                engine: emp.engine,
+                model: emp.model || "sonnet",
+                persona: emp.persona || "",
+              } as any
             } catch {
               return { name }
             }
