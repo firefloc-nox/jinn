@@ -1475,7 +1475,12 @@ Handle this request as a priority task from your chain of command. Assign it to 
     // GET /api/skills/:name
     params = matchRoute("/api/skills/:name", pathname);
     if (method === "GET" && params) {
-      const skillMd = path.join(SKILLS_DIR, params.name, "SKILL.md");
+      const resolved = path.resolve(path.join(SKILLS_DIR, params.name));
+      const skillDirResolved = path.resolve(SKILLS_DIR);
+      if (!resolved.startsWith(skillDirResolved + path.sep)) {
+        return badRequest(res, "Invalid skill name");
+      }
+      const skillMd = path.join(resolved, "SKILL.md");
       if (!fs.existsSync(skillMd)) return notFound(res);
       const content = fs.readFileSync(skillMd, "utf-8");
       return json(res, { name: params.name, content });
@@ -1484,9 +1489,13 @@ Handle this request as a priority task from your chain of command. Assign it to 
     // DELETE /api/skills/:name — remove a skill
     params = matchRoute("/api/skills/:name", pathname);
     if (method === "DELETE" && params) {
-      const skillDir = path.join(SKILLS_DIR, params.name);
-      if (!fs.existsSync(skillDir)) return notFound(res);
-      fs.rmSync(skillDir, { recursive: true, force: true });
+      const resolved = path.resolve(path.join(SKILLS_DIR, params.name));
+      const skillDirResolved = path.resolve(SKILLS_DIR);
+      if (!resolved.startsWith(skillDirResolved + path.sep)) {
+        return badRequest(res, "Invalid skill name");
+      }
+      if (!fs.existsSync(resolved)) return notFound(res);
+      fs.rmSync(resolved, { recursive: true, force: true });
       const { removeFromManifest } = await import("../cli/skills.js");
       removeFromManifest(params.name);
       logger.info(`Skill removed via API: ${params.name}`);
