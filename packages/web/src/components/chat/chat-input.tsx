@@ -166,21 +166,13 @@ export function ChatInput({
       .then(async (data) => {
         const emps = data.employees
         if (!Array.isArray(emps)) return
-        const details = await Promise.all(
-          emps.map(async (name: string) => {
+        const details: Employee[] = await Promise.all(
+          emps.map(async (name: string): Promise<Employee> => {
             try {
               const emp = await api.getEmployee(name)
-              return {
-                name: emp.name,
-                displayName: emp.displayName,
-                department: emp.department,
-                rank: emp.rank,
-                engine: emp.engine,
-                model: emp.model || "sonnet",
-                persona: emp.persona || "",
-              } as any
+              return emp
             } catch {
-              return { name }
+              return { name, displayName: name, department: '', rank: 'employee', engine: '', model: '', persona: '' }
             }
           })
         )
