@@ -37,6 +37,7 @@ import {
   FILES_DIR,
 } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
+import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
 import { getSttStatus, downloadModel, transcribe as sttTranscribe, resolveLanguages, WHISPER_LANGUAGES } from "../stt/stt.js";
 import { JINN_HOME } from "../shared/paths.js";
 import { resolveEffort } from "../shared/effort.js";
@@ -2342,6 +2343,17 @@ async function runWebSession(
       : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
+    let mcpConfigPath: string | undefined;
+    if (currentSession.engine === "claude") {
+      const mcpConfig = resolveMcpServers(config.mcp, employee);
+      const mcpServerNames = Object.keys(mcpConfig.mcpServers);
+      logger.info(`MCP resolve for ${currentSession.id} (employee: ${employee?.name || "none"}): ${mcpServerNames.length} servers [${mcpServerNames.join(", ")}]`);
+      if (mcpServerNames.length > 0) {
+        mcpConfigPath = writeMcpConfigFile(mcpConfig, currentSession.id);
+        logger.info(`MCP config written to ${mcpConfigPath}`);
+      }
+    }
+
     let lastHeartbeatAt = 0;
     const runHeartbeat = setInterval(() => {
       updateSession(currentSession.id, {
@@ -2372,6 +2384,7 @@ async function runWebSession(
       model: currentSession.model ?? engineConfig.model,
       effortLevel,
       cliFlags: employee?.cliFlags,
+      mcpConfigPath,
       attachments: attachments?.length ? attachments : undefined,
       sessionId: currentSession.id,
       onStream: (delta) => {
@@ -2396,6 +2409,7 @@ async function runWebSession(
       },
     }).finally(() => {
       clearInterval(runHeartbeat);
+      if (mcpConfigPath) cleanupMcpConfigFile(currentSession.id);
     });
 
     if (!getSession(currentSession.id)) {
