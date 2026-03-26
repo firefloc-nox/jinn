@@ -369,7 +369,7 @@ export interface JinnConfig {
     claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
     gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
-    local?: { bin?: string; model?: string; maxContextChars?: number };
+    local?: { url?: string; model?: string; maxContextChars?: number };
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;

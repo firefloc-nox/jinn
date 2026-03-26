@@ -23,7 +23,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { ChevronLeft, Check, EllipsisVertical, Trash2 } from 'lucide-react'
+import { ChevronLeft, Check, EllipsisVertical, Trash2, Activity } from 'lucide-react'
+import { useSessionActivity } from '@/hooks/use-session-activity'
+import { SessionActivityPanel } from '@/components/activity/session-activity-panel'
 
 function getOnboardingPrompt(portalName: string, userMessage: string) {
   return `This is your first time being activated. The user just set up ${portalName} and opened the web dashboard for the first time.
@@ -96,9 +98,11 @@ function ChatPage() {
   const [showSessionPicker, setShowSessionPicker] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [activityOpen, setActivityOpen] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const sessionPickerRef = useRef<HTMLDivElement>(null)
   const { events, connectionSeq, skillsVersion, subscribe } = useGateway()
+  const { events: activityEvents, sessionStatus } = useSessionActivity({ sessionId: selectedId, subscribe })
   const chatTabs = useChatTabs()
   const searchParams = useSearchParams()
   const onboardingTriggered = useRef(false)
@@ -365,6 +369,19 @@ function ChatPage() {
         </div>
       )}
 
+      {selectedId && (
+        <button
+          onClick={() => setActivityOpen(v => !v)}
+          aria-label="Activity"
+          className={cn(
+            "hidden lg:flex items-center rounded-md p-1 transition-colors hover:bg-accent",
+            activityOpen ? "text-[var(--accent)]" : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Activity className="size-[18px]" />
+        </button>
+      )}
+
       <div className="hidden lg:block">{moreMenu}</div>
 
       {copiedField && (
@@ -419,23 +436,33 @@ function ChatPage() {
             toolbarActions={toolbarActions}
           />
 
-          <ChatPane
-            sessionId={selectedId}
-            isActive={true}
-            onFocus={() => {}}
-            onSessionCreated={handleSessionCreated}
-            onSessionMetaChange={handleSessionMetaChange}
-            onRefresh={handleRefresh}
-            portalName={portalName}
-            subscribe={subscribe}
-            connectionSeq={connectionSeq}
-            skillsVersion={skillsVersion}
-            events={events}
-            viewMode={viewMode}
-            getOnboardingPrompt={stubSessionRef.current ? handleGetOnboardingPrompt : undefined}
-            isStubSession={stubSessionRef.current}
-            onStubCleared={handleStubCleared}
-          />
+          <div className="relative flex-1 overflow-hidden flex flex-col">
+            <ChatPane
+              sessionId={selectedId}
+              isActive={true}
+              onFocus={() => {}}
+              onSessionCreated={handleSessionCreated}
+              onSessionMetaChange={handleSessionMetaChange}
+              onRefresh={handleRefresh}
+              portalName={portalName}
+              subscribe={subscribe}
+              connectionSeq={connectionSeq}
+              skillsVersion={skillsVersion}
+              events={events}
+              viewMode={viewMode}
+              getOnboardingPrompt={stubSessionRef.current ? handleGetOnboardingPrompt : undefined}
+              isStubSession={stubSessionRef.current}
+              onStubCleared={handleStubCleared}
+            />
+            {activityOpen && selectedId && (
+              <SessionActivityPanel
+                events={activityEvents}
+                sessionTitle={sessionMeta?.title}
+                sessionStatus={sessionStatus}
+                onClose={() => setActivityOpen(false)}
+              />
+            )}
+          </div>
         </div>
       </div>
 

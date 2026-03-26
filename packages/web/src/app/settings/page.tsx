@@ -49,7 +49,7 @@ interface Config {
     claude?: { bin?: string; model?: string; effortLevel?: string }
     codex?: { bin?: string; model?: string; effortLevel?: string }
     gemini?: { bin?: string; model?: string; effortLevel?: string }
-    local?: { bin?: string; model?: string; maxContextChars?: number }
+    local?: { url?: string; model?: string; maxContextChars?: number }
   }
   sessions?: {
     maxDurationMinutes?: number
@@ -1039,6 +1039,34 @@ export default function SettingsPage() {
                       { value: "medium", label: "Medium" },
                       { value: "high", label: "High" },
                     ]}
+                  />
+                </FieldRow>
+
+                <div
+                  className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]"
+                />
+
+                <div
+                  className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]"
+                >
+                  Local (OpenAI-compatible)
+                </div>
+                <FieldRow label="API URL">
+                  <SettingsInput
+                    value={config.engines?.local?.url ?? ""}
+                    onChange={(v) =>
+                      updateConfig(["engines", "local", "url"], v)
+                    }
+                    placeholder="http://localhost:1234"
+                  />
+                </FieldRow>
+                <FieldRow label="Model">
+                  <SettingsInput
+                    value={config.engines?.local?.model ?? ""}
+                    onChange={(v) =>
+                      updateConfig(["engines", "local", "model"], v)
+                    }
+                    placeholder="lmstudio-community/..."
                   />
                 </FieldRow>
               </Section>
