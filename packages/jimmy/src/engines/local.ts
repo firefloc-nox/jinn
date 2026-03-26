@@ -56,6 +56,35 @@ export class LocalEngine implements InterruptibleEngine {
     this.model = config.model;
   }
 
+  /**
+   * Check the model state via LM Studio's /api/v0/models/:id endpoint and
+   * emit a status update if the model is not yet loaded.
+   *
+   * LM Studio handles JIT loading natively: sending a /v1/chat/completions
+   * request with a specific model ID triggers automatic loading, and the
+   * model unloads itself after an idle TTL. This method only provides user
+   * feedback — it never forces a load so the auto-unload behaviour is preserved.
+   *
+   * No-ops silently on non-LM-Studio backends (Ollama, llama.cpp, etc.)
+   */
+  private async checkModelState(
+    model: string,
+    signal: AbortSignal,
+    onStream?: (d: StreamDelta) => void,
+  ): Promise<void> {
+    try {
+      const resp = await fetch(`${this.url}/api/v0/models/${model}`, { signal });
+      if (!resp.ok) return;
+      const data = await resp.json() as { state?: string };
+      if (data.state && data.state !== "loaded") {
+        logger.info(`[local] Model "${model}" is "${data.state}" — LM Studio will JIT load on first request`);
+        onStream?.({ type: "status", content: "Loading model..." });
+      }
+    } catch {
+      // Non-LM Studio backend or API unavailable — proceed silently
+    }
+  }
+
   async run(opts: EngineRunOpts): Promise<EngineResult> {
     const startMs = Date.now();
     const sessionId = opts.resumeSessionId || opts.sessionId || randomUUID();
@@ -74,6 +103,15 @@ export class LocalEngine implements InterruptibleEngine {
       messages.push({ role: "system", content: opts.systemPrompt });
     }
     messages.push({ role: "user", content: opts.prompt });
+
+    // Check model state for user feedback (LM Studio only).
+    // The actual JIT loading is handled natively by LM Studio when the
+    // inference request arrives — we never force-load to preserve auto-unload.
+    await this.checkModelState(model, controller.signal, opts.onStream);
+    if (controller.signal.aborted) {
+      if (opts.sessionId) this.liveControllers.delete(opts.sessionId);
+      return { sessionId, result: "", cost: 0, durationMs: Date.now() - startMs, numTurns: 1, error: "Request aborted" };
+    }
 
     // Retry logic for JIT model loading — LM Studio/Ollama may terminate
     // the first SSE connection while loading the model into memory.
@@ -129,10 +167,10 @@ export class LocalEngine implements InterruptibleEngine {
           // Retryable errors during model JIT loading:
           // - 404: LM Studio returns this when server API is momentarily unavailable
           // - 500-503: server errors while model is loading
-          // - 400 "Model unloaded": LM Studio returns this when model was evicted
+          // - 400 "Model unloaded" or "No models loaded": model was evicted or not yet ready
           const isRetryable = response.status === 404
             || (response.status >= 500 && response.status <= 503)
-            || (response.status === 400 && body.includes("unloaded"));
+            || (response.status === 400 && (body.includes("unloaded") || body.includes("No models loaded")));
           if (attempt < MAX_RETRIES && isRetryable) {
             lastError = error;
             continue;

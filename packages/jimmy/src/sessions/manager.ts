@@ -381,13 +381,14 @@ export class SessionManager {
               ? resumeAt.toLocaleString("en-GB", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
               : null;
 
+            const fallbackLabel = fallbackName === "local" ? "local model" : "GPT";
             notifyDiscordChannel(
-              `⚠️ Claude usage limit reached. Session ${session.id}${session.employee ? ` (${session.employee})` : ""} switching to GPT.`,
+              `⚠️ Claude usage limit reached. Session ${session.id}${session.employee ? ` (${session.employee})` : ""} switching to ${fallbackLabel}.`,
             );
 
             await connector.replyMessage(
               target,
-              `⚠️ Claude usage limit reached${resumeText ? `. Resets ${resumeText}` : ""}. Switching to GPT for now.`,
+              `⚠️ Claude usage limit reached${resumeText ? `. Resets ${resumeText}` : ""}. Switching to ${fallbackLabel} for now.`,
             ).catch(() => {});
 
             const nextMeta = { ...(session.transportMeta || {}) } as Record<string, unknown>;
@@ -403,31 +404,34 @@ export class SessionManager {
 
             updateSession(session.id, {
               engine: fallbackName,
-              // Keep Claude engine_session_id intact for later restore; Codex will return its own thread id.
               transportMeta: nextMeta as any,
               status: "running",
               lastActivity: new Date().toISOString(),
               lastError: resumeAt
-                ? `Claude usage limit — using GPT until ${resumeAt.toISOString()}`
-                : "Claude usage limit — using GPT temporarily",
+                ? `Claude usage limit — using ${fallbackLabel} until ${resumeAt.toISOString()}`
+                : `Claude usage limit — using ${fallbackLabel} temporarily`,
             });
 
-            const fallbackConfig = this.config.engines.codex;
-            const fallbackEffort = resolveEffort(fallbackConfig, session, employee);
-            const codexResume = typeof engineSessions.codex === "string" ? (engineSessions.codex as string) : undefined;
+            const fallbackConfig = fallbackName === "local"
+              ? (this.config.engines.local ?? this.config.engines.codex)
+              : this.config.engines.codex;
+            const fallbackEffort = resolveEffort(fallbackConfig as { effortLevel?: string; childEffortOverride?: string }, session, employee);
+            const fallbackResume = typeof engineSessions[fallbackName] === "string"
+              ? (engineSessions[fallbackName] as string)
+              : undefined;
             const history = getMessages(session.id)
               .filter((m) => m.role === "user" || m.role === "assistant")
               .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
             const historyText = history.slice(-12).join("\n\n");
-            const fallbackPrompt = codexResume
+            const fallbackPrompt = fallbackResume
               ? msg.text
               : `Continue this conversation and respond to the last USER message.\n\nConversation so far:\n\n${historyText}`;
             const fallbackResult = await fallbackEngine.run({
               prompt: fallbackPrompt,
-              resumeSessionId: codexResume,
+              resumeSessionId: fallbackResume,
               systemPrompt,
               cwd: JINN_HOME,
-              bin: fallbackConfig.bin,
+              bin: (fallbackConfig as { bin?: string }).bin,
               model: session.model ?? fallbackConfig.model,
               effortLevel: fallbackEffort,
               cliFlags: employee?.cliFlags,
@@ -444,10 +448,10 @@ export class SessionManager {
               accumulateSessionCost(session.id, fallbackResult.cost ?? 0, fallbackResult.numTurns ?? 1);
             }
 
-            // Persist Codex thread id so future fallbacks can resume it
+            // Persist fallback thread id so future fallbacks can resume it
             const nextEngineSessions = { ...engineSessions };
             if (fallbackResult.sessionId) {
-              nextEngineSessions.codex = fallbackResult.sessionId;
+              nextEngineSessions[fallbackName] = fallbackResult.sessionId;
             }
             const metaAfter = { ...(getSessionBySessionKey(msg.sessionKey)?.transportMeta || nextMeta) } as Record<string, unknown>;
             metaAfter.engineSessions = nextEngineSessions;

@@ -131,9 +131,14 @@ export async function startGateway(
   // Set up engines
   const claudeEngine = new ClaudeEngine();
   const codexEngine = new CodexEngine();
-  const engines = new Map<string, InstanceType<typeof ClaudeEngine> | InstanceType<typeof CodexEngine>>();
+  const engines = new Map<string, InstanceType<typeof ClaudeEngine> | InstanceType<typeof CodexEngine> | LocalEngine>();
   engines.set("claude", claudeEngine);
   engines.set("codex", codexEngine);
+  if (config.engines.local?.url) {
+    const localEngine = new LocalEngine(config.engines.local);
+    engines.set("local", localEngine);
+    logger.info(`Local engine registered (url: ${config.engines.local.url}, model: ${config.engines.local.model})`);
+  }
 
   // Derive connector names from config
   const connectorNames: string[] = [];
