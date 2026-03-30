@@ -13,6 +13,7 @@ import { SessionManager, type RouteOptions } from "../sessions/manager.js";
 import { ClaudeEngine } from "../engines/claude.js";
 import { CodexEngine } from "../engines/codex.js";
 import { GeminiEngine } from "../engines/gemini.js";
+import { HermesEngine } from "../engines/hermes.js";
 import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
 import { ensureFilesDir } from "./files.js";
 import { initStt } from "../stt/stt.js";
@@ -133,10 +134,17 @@ export async function startGateway(
   const claudeEngine = new ClaudeEngine();
   const codexEngine = new CodexEngine();
   const geminiEngine = new GeminiEngine();
-  const engines = new Map<string, InstanceType<typeof ClaudeEngine> | InstanceType<typeof CodexEngine> | InstanceType<typeof GeminiEngine>>();
+  const engines = new Map<string, ClaudeEngine | CodexEngine | GeminiEngine | HermesEngine>();
   engines.set("claude", claudeEngine);
   engines.set("codex", codexEngine);
   engines.set("gemini", geminiEngine);
+
+  // Register Hermes engine if configured
+  if (config.engines.hermes) {
+    const hermesEngine = new HermesEngine();
+    engines.set("hermes", hermesEngine);
+    logger.info(`Hermes engine registered (bin: ${config.engines.hermes.bin}, model: ${config.engines.hermes.model})`);
+  }
 
   // Derive connector names from config
   const connectorNames: string[] = [];
