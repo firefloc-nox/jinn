@@ -29,6 +29,8 @@ import { loadJobs } from "../cron/jobs.js";
 import { setCronJobEnabled, triggerCronJob } from "../cron/scheduler.js";
 import { checkBudget } from "../gateway/budgets.js";
 import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
+import { DEFAULT_FALLBACK_POLICY, resolveFallbackExecutor } from "./fallback.js";
+import { getCapabilities } from "../engines/capabilities.js";
 
 export interface RouteOptions {
   employee?: Employee;
@@ -180,7 +182,7 @@ export class SessionManager {
         : null;
       await connector.replyMessage(
         target,
-        `⏳ Still paused due to Claude usage limit${resumeText ? ` (resets ${resumeText})` : ""}. I queued this message and will respond automatically.`,
+        `⏳ Still paused due to engine usage limit${resumeText ? ` (resets ${resumeText})` : ""}. I queued this message and will respond automatically.`,
       ).catch(() => {});
     }
 
@@ -205,10 +207,26 @@ export class SessionManager {
     target: Target,
     employee?: Employee,
   ): Promise<void> {
-    const engine = this.engines.get(session.engine);
+    // Resolve brain via FallbackPolicy — Hermes-first by default
+    const fallbackPolicy = this.config.brain ?? DEFAULT_FALLBACK_POLICY;
+    const requestedBrain = session.engine;
+    const availableEngines = new Set(this.engines.keys());
+    const { executor: resolvedEngine, fallbackUsed, fallbackReason } = resolveFallbackExecutor(
+      requestedBrain,
+      availableEngines,
+      fallbackPolicy,
+    );
+
+    if (fallbackUsed) {
+      logger.warn(
+        `Session ${session.id}: fallback triggered — requested "${requestedBrain}", using "${resolvedEngine}". Reason: ${fallbackReason}`,
+      );
+    }
+
+    const engine = this.engines.get(resolvedEngine);
     if (!engine) {
-      logger.error(`Engine "${session.engine}" not found for session ${session.id}`);
-      await connector.replyMessage(target, `Error: engine "${session.engine}" not available.`);
+      logger.error(`Engine "${resolvedEngine}" not found for session ${session.id}`);
+      await connector.replyMessage(target, `Error: engine "${resolvedEngine}" not available.`);
       return;
     }
 
@@ -259,12 +277,19 @@ export class SessionManager {
         hierarchy,
       });
 
-      const engineConfig = session.engine === "codex"
+      // Resolve engine config for the actual executor (not the requested brain)
+      const engineConfig = resolvedEngine === "codex"
         ? this.config.engines.codex
-        : session.engine === "gemini"
+        : resolvedEngine === "gemini"
           ? this.config.engines.gemini ?? this.config.engines.claude
-          : this.config.engines.claude;
-      if (session.engine === "claude") {
+          : resolvedEngine === "hermes"
+            ? this.config.engines.hermes ?? this.config.engines.claude
+            : this.config.engines.claude;
+
+      // MCP: skip Jinn-side MCP resolution for Hermes (mcpNative=true) — Hermes manages MCP internally.
+      // Only resolve MCP config for legacy engines that need mcpConfigPath.
+      const engineCaps = getCapabilities(resolvedEngine);
+      if (!engineCaps.mcpNative && resolvedEngine === "claude") {
         const mcpConfig = resolveMcpServers(this.config.mcp, employee);
         if (Object.keys(mcpConfig.mcpServers).length > 0) {
           mcpConfigPath = writeMcpConfigFile(mcpConfig, session.id);
@@ -315,7 +340,8 @@ export class SessionManager {
 
       // Heuristic preflight warning: Claude usage limits don't expose a precise "remaining" budget.
       // If we've hit the limit recently and this looks like a heavy turn, warn before we spend time.
-      if (decorateMessages && session.engine === "claude" && isLikelyNearClaudeUsageLimit()) {
+      // Only applies when the resolved executor is claude (not Hermes or other engines).
+      if (decorateMessages && resolvedEngine === "claude" && isLikelyNearClaudeUsageLimit()) {
         const modelName = (session.model ?? engineConfig.model ?? "").toLowerCase();
         const heavyEffort = ["high", "xhigh", "max"].includes((effortLevel || "").toLowerCase());
         const heavyModel = modelName.includes("opus");
@@ -344,7 +370,28 @@ export class SessionManager {
         mcpConfigPath,
         attachments: attachments.length > 0 ? attachments : undefined,
         sessionId: session.id,
+        ...(resolvedEngine === "hermes" && employee ? {
+          hermesProfile: employee.name,
+          hermesProvider: (employee as any).provider,
+        } : {}),
       });
+
+      // Persist Hermes runtime metadata + fallback info into transportMeta for API/frontend
+      if (result.hermesMeta || fallbackUsed) {
+        const currentMeta = { ...(session.transportMeta || {}) } as Record<string, unknown>;
+        if (result.hermesMeta) {
+          currentMeta["hermesMeta"] = {
+            ...result.hermesMeta,
+            requestedBrain,
+            actualExecutor: resolvedEngine,
+            fallbackUsed,
+            ...(fallbackReason ? { fallbackReason } : {}),
+          };
+        } else if (fallbackUsed) {
+          currentMeta["hermesMeta"] = { requestedBrain, actualExecutor: resolvedEngine, fallbackUsed, fallbackReason };
+        }
+        session = updateSession(session.id, { transportMeta: currentMeta as any }) ?? session;
+      }
 
       const wasInterrupted = result.error?.startsWith("Interrupted");
 
@@ -375,7 +422,8 @@ export class SessionManager {
         const strategy = this.config.sessions?.rateLimitStrategy ?? "fallback";
 
         // Optional fallback: switch to GPT (Codex) while Claude resets
-        if (session.engine === "claude" && strategy === "fallback") {
+        // Only applies when the resolved executor is claude (Hermes manages its own rate limits)
+        if (resolvedEngine === "claude" && strategy === "fallback") {
           const fallbackName = this.config.sessions?.fallbackEngine ?? "codex";
           const fallbackEngine = this.engines.get(fallbackName);
           if (fallbackEngine) {

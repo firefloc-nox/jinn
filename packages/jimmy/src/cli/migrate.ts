@@ -169,7 +169,8 @@ export async function runMigrate(opts: { check?: boolean; auto?: boolean }): Pro
 
   const config = loadConfig();
   const defaultEngine = config.engines.default ?? "claude";
-  const engineConfig = config.engines[defaultEngine] ?? config.engines.claude;
+  const engines = config.engines as unknown as Record<string, import("../shared/types.js").EngineConfig | undefined>;
+  const engineConfig = engines[defaultEngine] ?? config.engines.claude;
 
   try {
     const prompt = [
