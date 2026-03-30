@@ -31,6 +31,7 @@ import { checkBudget } from "../gateway/budgets.js";
 import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
 import { DEFAULT_FALLBACK_POLICY, resolveFallbackExecutor } from "./fallback.js";
 import { getCapabilities } from "../engines/capabilities.js";
+import { mapEmployeeToHermesInput, hermesRunInputToOpts } from "../hermes/profile-mapper.js";
 
 export interface RouteOptions {
   employee?: Employee;
@@ -277,14 +278,10 @@ export class SessionManager {
         hierarchy,
       });
 
-      // Resolve engine config for the actual executor (not the requested brain)
-      const engineConfig = resolvedEngine === "codex"
-        ? this.config.engines.codex
-        : resolvedEngine === "gemini"
-          ? this.config.engines.gemini ?? this.config.engines.claude
-          : resolvedEngine === "hermes"
-            ? this.config.engines.hermes ?? this.config.engines.claude
-            : this.config.engines.claude;
+      // Resolve engine config for the actual executor — dynamic lookup, not hardcoded branches.
+      // Falls back to claude config when the resolved engine has no dedicated config block.
+      const enginesRecord = this.config.engines as unknown as Record<string, import("../shared/types.js").EngineConfig | undefined>;
+      const engineConfig = enginesRecord[resolvedEngine] ?? this.config.engines.claude;
 
       // MCP: skip Jinn-side MCP resolution for Hermes (mcpNative=true) — Hermes manages MCP internally.
       // Only resolve MCP config for legacy engines that need mcpConfigPath.
@@ -370,26 +367,23 @@ export class SessionManager {
         mcpConfigPath,
         attachments: attachments.length > 0 ? attachments : undefined,
         sessionId: session.id,
-        ...(resolvedEngine === "hermes" && employee ? {
-          hermesProfile: employee.name,
-          hermesProvider: (employee as any).provider,
-        } : {}),
+        ...(resolvedEngine === "hermes" && employee ? hermesRunInputToOpts(mapEmployeeToHermesInput(employee)) : {}),
       });
 
-      // Persist Hermes runtime metadata + fallback info into transportMeta for API/frontend
-      if (result.hermesMeta || fallbackUsed) {
+      // Persist Hermes runtime metadata + routing decision into transportMeta for API/frontend.
+      // hermesMeta: engine-level metadata from HermesEngine output (only when Hermes ran).
+      // routingMeta: Jinn-side routing decision — always written, regardless of executor.
+      {
         const currentMeta = { ...(session.transportMeta || {}) } as Record<string, unknown>;
         if (result.hermesMeta) {
-          currentMeta["hermesMeta"] = {
-            ...result.hermesMeta,
-            requestedBrain,
-            actualExecutor: resolvedEngine,
-            fallbackUsed,
-            ...(fallbackReason ? { fallbackReason } : {}),
-          };
-        } else if (fallbackUsed) {
-          currentMeta["hermesMeta"] = { requestedBrain, actualExecutor: resolvedEngine, fallbackUsed, fallbackReason };
+          currentMeta["hermesMeta"] = result.hermesMeta;
         }
+        currentMeta["routingMeta"] = {
+          requestedBrain,
+          actualExecutor: resolvedEngine,
+          fallbackUsed,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        };
         session = updateSession(session.id, { transportMeta: currentMeta as any }) ?? session;
       }
 

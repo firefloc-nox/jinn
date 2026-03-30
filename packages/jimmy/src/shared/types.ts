@@ -63,6 +63,12 @@ export interface EngineRunOpts {
    * Passed as --provider to hermes chat if set.
    */
   hermesProvider?: string;
+  /**
+   * Hermes-specific: additional text appended to the system prompt (V1 — prefix injection).
+   * Maps from employee.persona via profile-mapper.
+   * V1.1 plan: pass as --append-system-prompt when upstream Hermes CLI supports it.
+   */
+  systemPromptAddition?: string;
 }
 
 export interface EngineResult {
@@ -96,14 +102,22 @@ export interface HermesRuntimeMeta {
   modelUsed?: string;
   /** Whether Honcho memory was active */
   honchoActive?: boolean;
-  /** Whether a fallback executor was used instead of the primary brain */
-  fallbackUsed?: boolean;
-  /** Reason for using a fallback */
+}
+
+/**
+ * Brain routing metadata — records the Jinn-side routing decision for a session.
+ * Produced by resolveFallbackExecutor() in sessions/fallback.ts.
+ * Always present in transportMeta["routingMeta"] after engine.run(), regardless of which executor was used.
+ */
+export interface BrainRoutingMeta {
+  /** The requested brain engine (may differ from actualExecutor when fallback triggered) */
+  requestedBrain: string;
+  /** The engine that actually executed the session */
+  actualExecutor: string;
+  /** Whether the primary brain was unavailable and a fallback was used */
+  fallbackUsed: boolean;
+  /** Human-readable reason for the fallback, if applicable */
   fallbackReason?: string;
-  /** The requested brain (may differ from actual executor) */
-  requestedBrain?: string;
-  /** The actual executor engine name */
-  actualExecutor?: string;
 }
 
 export interface EngineRateLimitInfo {
