@@ -408,6 +408,11 @@ export interface EngineConfig {
 export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
+  /**
+   * Brain fallback policy — declares the primary brain and fallback chain.
+   * When absent, defaults to hermes-first (see DEFAULT_FALLBACK_POLICY in sessions/fallback.ts).
+   */
+  brain?: import("../sessions/fallback.js").FallbackPolicy;
   engines: {
     /** Default engine name. Open string — not restricted to known engines. */
     default: EngineType;
