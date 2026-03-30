@@ -342,15 +342,42 @@ export async function handleApiRequest(
       const connectors = Object.fromEntries(
         Array.from(context.connectors.values()).map((connector) => [connector.name, connector.getHealth()]),
       );
+
+      // Build registered engines list dynamically (hermes included if configured)
+      const registeredEngines: Record<string, { model: string; available: boolean }> = {
+        claude: { model: config.engines.claude.model, available: true },
+        codex: { model: config.engines.codex.model, available: true },
+      };
+      if (config.engines.gemini) {
+        registeredEngines.gemini = { model: config.engines.gemini.model, available: true };
+      }
+      if (config.engines.hermes) {
+        registeredEngines.hermes = { model: config.engines.hermes.model, available: true };
+      }
+
+      // Determine effective default brain: prefer hermes if configured, else config.engines.default
+      const defaultBrain: string =
+        (config as any).brain?.primary ??
+        (config.engines.hermes ? "hermes" : config.engines.default);
+
       return json(res, {
         status: "ok",
         uptime: Math.floor((Date.now() - context.startTime) / 1000),
         port: config.gateway.port || 7777,
         engines: {
           default: config.engines.default,
+          defaultBrain,
+          registered: registeredEngines,
+          // Legacy fields for backwards compat
           claude: { model: config.engines.claude.model, available: true },
           codex: { model: config.engines.codex.model, available: true },
           ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
+          ...(config.engines.hermes ? { hermes: { model: config.engines.hermes.model, available: true } } : {}),
+        },
+        brain: {
+          primary: defaultBrain,
+          fallbacks: (config as any).brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
+          fallbackPolicy: (config as any).brain ?? null,
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
