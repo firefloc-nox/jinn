@@ -77,6 +77,33 @@ export interface EngineResult {
    * `resetsAt` is a Unix timestamp in seconds.
    */
   rateLimit?: EngineRateLimitInfo;
+  /**
+   * Hermes-specific runtime metadata surfaced from engine output.
+   * Present only when the Hermes engine was used.
+   */
+  hermesMeta?: HermesRuntimeMeta;
+}
+
+/** Runtime metadata produced by HermesEngine and propagated to session/API. */
+export interface HermesRuntimeMeta {
+  /** Native Hermes session ID (from `session_id: <id>` in stdout) */
+  hermesSessionId?: string;
+  /** Active Hermes profile name */
+  activeProfile?: string;
+  /** Provider actually used (e.g. "anthropic", "openrouter") */
+  providerUsed?: string;
+  /** Model actually used */
+  modelUsed?: string;
+  /** Whether Honcho memory was active */
+  honchoActive?: boolean;
+  /** Whether a fallback executor was used instead of the primary brain */
+  fallbackUsed?: boolean;
+  /** Reason for using a fallback */
+  fallbackReason?: string;
+  /** The requested brain (may differ from actual executor) */
+  requestedBrain?: string;
+  /** The actual executor engine name */
+  actualExecutor?: string;
 }
 
 export interface EngineRateLimitInfo {
