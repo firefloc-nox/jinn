@@ -108,6 +108,43 @@ The CLI sends commands to the gateway daemon. The daemon dispatches work to AI
 engines (Claude Code, Codex, Gemini CLI), manages connector integrations, runs
 scheduled cron jobs, and serves the web dashboard.
 
+## 🧠 Hermes-first engine
+
+Starting with the Hermes-first refactor, **Hermes is the default brain** when available.
+
+| Engine | Role |
+|--------|------|
+| **Hermes** | Primary brain — MCP-native, session-resumable, default when installed |
+| Claude Code | Fallback #1 — streaming, cost tracking, Max subscription support |
+| Codex | Fallback #2 — OpenAI GPT-based |
+| Gemini CLI | Fallback #3 — Google Gemini |
+
+### How it works
+
+1. `jinn setup` detects if `hermes` is in your PATH (`hermes --version`)
+2. If found, it sets `engines.default: hermes` in `~/.jinn/config.yaml`
+3. The session manager routes all new sessions to Hermes by default
+4. If Hermes is unavailable, the fallback chain is tried in order: `claude → codex → gemini`
+5. Session metadata tracks `requestedBrain`, `actualExecutor`, and `fallbackUsed`
+
+### Config example with Hermes
+
+```yaml
+engines:
+  default: hermes
+  hermes:
+    bin: hermes
+    model: default
+  claude:
+    bin: claude
+    model: opus
+  codex:
+    bin: codex
+    model: gpt-5.4
+```
+
+Claude, Codex, and Gemini remain fully supported as fallback engines.
+
 ## ⚙️ Configuration
 
 Jinn reads its configuration from `~/.jinn/config.yaml`. An example:

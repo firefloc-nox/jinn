@@ -10,5 +10,13 @@ export function loadConfig(): JinnConfig {
     );
   }
   const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-  return yaml.load(raw) as JinnConfig;
+  const config = yaml.load(raw) as JinnConfig;
+
+  // Hermes-first default: if no brain/defaultEngine is set, prefer hermes when available.
+  // Falls back to claude if hermes is not configured.
+  if (!config.engines.default) {
+    config.engines.default = config.engines.hermes ? "hermes" : "claude";
+  }
+
+  return config;
 }

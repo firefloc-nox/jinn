@@ -311,6 +311,14 @@ export async function runSetup(opts?: { force?: boolean }): Promise<void> {
     info("Install with: npm install -g @openai/codex");
   }
 
+  // 3b. Check for hermes binary (optional — Hermes-first brain)
+  const hermesPath = whichBin("hermes");
+  if (hermesPath) {
+    ok(`hermes found at ${hermesPath}`);
+  } else {
+    info("hermes not found (optional — enables Hermes-first brain mode)");
+  }
+
   // 4. Check auth / versions
   console.log("");
   if (claudePath) {
@@ -324,9 +332,21 @@ export async function runSetup(opts?: { force?: boolean }): Promise<void> {
     else warn("codex --version failed");
   }
 
+  // 4b. Check hermes version and register as default brain if available
+  if (hermesPath) {
+    const hermesVer = runVersion("hermes");
+    if (hermesVer) {
+      ok(`hermes --version: ${hermesVer}`);
+      ok("Hermes registered as default brain (hermes-first mode enabled)");
+    } else {
+      warn("hermes --version failed — Hermes will not be set as default brain");
+    }
+  }
+
   // 5. Interactive setup (only when stdin is a TTY and config doesn't exist yet)
   const isFreshSetup = !fs.existsSync(CONFIG_PATH);
   const isInteractive = process.stdin.isTTY && isFreshSetup;
+  const hermesAvailable = !!hermesPath && !!runVersion("hermes");
 
   // Derive default COO name from instance name if set, otherwise "Jinn"
   const instanceName = process.env.JINN_INSTANCE;
@@ -376,6 +396,17 @@ export async function runSetup(opts?: { force?: boolean }): Promise<void> {
     source = source.replace(/default:\s*claude/, `default: ${chosenEngine}`);
     if (chosenName !== "Jinn") {
       source = source.replace("portal: {}", `portal:\n  portalName: "${chosenName}"`);
+    }
+    // If hermes is available, add it to the config and set as default brain
+    if (hermesAvailable) {
+      if (!source.includes("hermes:")) {
+        source = source.replace(
+          /connectors:/,
+          `  hermes:\n    bin: hermes\n    model: default\nconnectors:`,
+        );
+      }
+      // Set hermes as default engine
+      source = source.replace(/default:\s*\w+/, "default: hermes");
     }
     ensureFile(CONFIG_PATH, source);
     created.push(CONFIG_PATH);
