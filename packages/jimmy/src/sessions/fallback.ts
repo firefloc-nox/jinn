@@ -12,6 +12,7 @@ export interface FallbackPolicy {
   /** Fall back to next engine if primary is not registered */
   fallbackOnUnavailable: boolean;
   /** Fall back to next engine if primary fails with a hard error */
+  // V2 — not yet consumed by resolveFallbackExecutor. Reserved for hard-failure retry logic.
   fallbackOnHardFailure: boolean;
 }
 
@@ -19,6 +20,7 @@ export const DEFAULT_FALLBACK_POLICY: FallbackPolicy = {
   primary: "hermes",
   fallbacks: ["claude", "codex", "gemini"],
   fallbackOnUnavailable: true,
+  // V2 — not yet consumed by resolveFallbackExecutor. Reserved for hard-failure retry logic.
   fallbackOnHardFailure: true,
 };
 

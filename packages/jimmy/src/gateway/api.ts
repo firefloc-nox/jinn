@@ -357,7 +357,7 @@ export async function handleApiRequest(
 
       // Determine effective default brain: prefer hermes if configured, else config.engines.default
       const defaultBrain: string =
-        (config as any).brain?.primary ??
+        config.brain?.primary ??
         (config.engines.hermes ? "hermes" : config.engines.default);
 
       return json(res, {
@@ -376,8 +376,8 @@ export async function handleApiRequest(
         },
         brain: {
           primary: defaultBrain,
-          fallbacks: (config as any).brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
-          fallbackPolicy: (config as any).brain ?? null,
+          fallbacks: config.brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
+          fallbackPolicy: config.brain ?? null,
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
