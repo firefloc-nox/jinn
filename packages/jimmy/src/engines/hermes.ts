@@ -35,7 +35,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import type { InterruptibleEngine, EngineRunOpts, EngineResult } from "../shared/types.js";
+import type { InterruptibleEngine, EngineRunOpts, EngineResult, HermesRuntimeMeta } from "../shared/types.js";
 import { logger } from "../shared/logger.js";
 
 interface LiveProcess {
@@ -45,6 +45,12 @@ interface LiveProcess {
 
 /** Regex to extract session_id from the last line of hermes --quiet output */
 const SESSION_ID_RE = /^session_id:\s*(.+)$/;
+/** Regex to extract provider from hermes output: "provider: anthropic" */
+const PROVIDER_RE = /^provider:\s*(.+)$/;
+/** Regex to extract model from hermes output: "model: claude-sonnet-4-5" */
+const MODEL_RE = /^model:\s*(.+)$/;
+/** Regex to detect honcho active from hermes output: "honcho: active" */
+const HONCHO_RE = /^honcho:\s*active$/i;
 
 export class HermesEngine implements InterruptibleEngine {
   name = "hermes" as const;
@@ -174,7 +180,7 @@ export class HermesEngine implements InterruptibleEngine {
         }
 
         if (code === 0) {
-          const { result, sessionId } = parseHermesOutput(stdout, opts.resumeSessionId);
+          const { result, sessionId, hermesMeta } = parseHermesOutput(stdout, opts.resumeSessionId, opts.hermesProfile);
           logger.info(`Hermes result: session_id=${sessionId || "none"}, result_length=${result.length}`);
 
           // V1 streaming: emit a single text delta with the full result
@@ -182,7 +188,7 @@ export class HermesEngine implements InterruptibleEngine {
             opts.onStream({ type: "text", content: result });
           }
 
-          resolve({ sessionId, result, durationMs, numTurns: 1 });
+          resolve({ sessionId, result, durationMs, numTurns: 1, hermesMeta });
           return;
         }
 
@@ -249,27 +255,57 @@ export class HermesEngine implements InterruptibleEngine {
 export function parseHermesOutput(
   stdout: string,
   fallbackSessionId?: string,
-): { result: string; sessionId: string } {
+  activeProfile?: string,
+): { result: string; sessionId: string; hermesMeta: HermesRuntimeMeta } {
   const lines = stdout.split("\n");
   let sessionId = fallbackSessionId || "";
   let sessionLineIndex = -1;
+  const meta: HermesRuntimeMeta = {};
 
-  // Scan from the end for the session_id line
+  if (activeProfile) meta.activeProfile = activeProfile;
+
+  // Scan from the end for metadata lines (session_id, provider, model, honcho)
+  // These are emitted after the response text in --quiet mode
+  const metaLineIndices = new Set<number>();
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
-    const match = trimmed.match(SESSION_ID_RE);
-    if (match) {
-      sessionId = match[1].trim();
-      sessionLineIndex = i;
-      break;
+
+    const sessionMatch = trimmed.match(SESSION_ID_RE);
+    if (sessionMatch) {
+      sessionId = sessionMatch[1].trim();
+      meta.hermesSessionId = sessionId;
+      metaLineIndices.add(i);
+      continue;
     }
-    // First non-empty line from end that is not session_id — stop scanning
+    const providerMatch = trimmed.match(PROVIDER_RE);
+    if (providerMatch) {
+      meta.providerUsed = providerMatch[1].trim();
+      metaLineIndices.add(i);
+      continue;
+    }
+    const modelMatch = trimmed.match(MODEL_RE);
+    if (modelMatch) {
+      meta.modelUsed = modelMatch[1].trim();
+      metaLineIndices.add(i);
+      continue;
+    }
+    if (HONCHO_RE.test(trimmed)) {
+      meta.honchoActive = true;
+      metaLineIndices.add(i);
+      continue;
+    }
+    // First non-meta, non-empty line from end — stop scanning
     break;
+  }
+
+  // sessionLineIndex = last meta line found (for slicing result)
+  if (metaLineIndices.size > 0) {
+    sessionLineIndex = Math.min(...metaLineIndices);
   }
 
   const resultLines = sessionLineIndex >= 0 ? lines.slice(0, sessionLineIndex) : lines;
   const result = resultLines.join("\n").trim();
 
-  return { result, sessionId };
+  return { result, sessionId, hermesMeta: meta };
 }
