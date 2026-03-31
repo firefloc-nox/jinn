@@ -18,5 +18,10 @@ export function loadConfig(): JinnConfig {
     config.engines.default = config.engines.hermes ? "hermes" : "claude";
   }
 
+  // Provide a safe default for logging so missing section doesn't crash at runtime.
+  if (!config.logging) {
+    config.logging = { level: "info", file: false, stdout: true };
+  }
+
   return config;
 }
