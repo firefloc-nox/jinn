@@ -55,7 +55,7 @@ export interface EngineRunOpts {
   sessionId?: string;
   /**
    * Hermes-specific: profile name to activate for this session.
-   * Maps to a named Hermes profile (future V2 — not used in V1 spawn).
+   * Passed as --profile to hermes chat.
    */
   hermesProfile?: string;
   /**
@@ -63,6 +63,21 @@ export interface EngineRunOpts {
    * Passed as --provider to hermes chat if set.
    */
   hermesProvider?: string;
+  /**
+   * Hermes-specific: comma-separated toolsets to enable (e.g. "terminal,file,web").
+   * Passed as --toolsets to hermes chat if set.
+   */
+  hermesToolsets?: string;
+  /**
+   * Hermes-specific: comma-separated skills to load (e.g. "plan,code-review").
+   * Passed as --skills to hermes chat if set.
+   */
+  hermesSkills?: string;
+  /**
+   * Hermes-specific: pass --pass-session-id to hermes chat.
+   * Enables Hermes to correlate with Jinn's session ID.
+   */
+  hermesPassSessionId?: boolean;
   /**
    * Hermes-specific: additional text appended to the system prompt (V1 — prefix injection).
    * Maps from employee.persona via profile-mapper.
@@ -281,6 +296,14 @@ export interface Employee {
   reportsTo?: string | string[];
   /** Services this employee provides to the org */
   provides?: ServiceDeclaration[];
+  /** Hermes-specific: named Hermes profile to activate (maps to --profile) */
+  hermesProfile?: string;
+  /** Hermes-specific: provider override (maps to --provider) */
+  hermesProvider?: string;
+  /** Hermes-specific: comma-separated toolsets to enable (maps to --toolsets) */
+  hermesToolsets?: string;
+  /** Hermes-specific: comma-separated skills to load (maps to --skills) */
+  hermesSkills?: string;
 }
 
 /** A service that an employee can provide to other employees/departments. */

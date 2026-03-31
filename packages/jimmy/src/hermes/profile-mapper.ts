@@ -2,18 +2,17 @@
  * Hermes profile mapper — translates Jinn Employee/session config into
  * HermesRunInput opts for HermesEngine.run().
  *
- * V1: maps employee engine, model, persona, and MCP flags.
- * V2 plan: support named Hermes profiles via --profile flag when available upstream.
+ * V1: maps employee engine, model, persona, MCP flags, profile, toolsets, and skills.
  */
 
 import type { Employee } from "../shared/types.js";
 
 /**
  * Runtime inputs passed to Hermes for a session.
- * Maps to EngineRunOpts fields: hermesProfile, hermesProvider, model, systemPrompt additions.
+ * Maps to EngineRunOpts fields: hermesProfile, hermesProvider, hermesToolsets, hermesSkills, model, systemPrompt additions.
  */
 export interface HermesRunInput {
-  /** Named Hermes profile to activate (V2 — reserved, not yet a CLI flag) */
+  /** Named Hermes profile to activate — passed as --profile to hermes chat */
   profile?: string;
   /** Additional system prompt text appended to the base context (persona, employee instructions) */
   systemAddition?: string;
@@ -27,6 +26,10 @@ export interface HermesRunInput {
   mcpEnabled?: boolean;
   /** Whether Honcho memory integration is enabled for this session */
   honchoEnabled?: boolean;
+  /** Comma-separated toolsets to enable — passed as --toolsets to hermes chat */
+  toolsets?: string;
+  /** Comma-separated skills to load — passed as --skills to hermes chat */
+  skills?: string;
 }
 
 /**
@@ -54,15 +57,31 @@ export function mapEmployeeToHermesInput(
     input.systemAddition = employee.persona.trim();
   }
 
+  // Profile: employee.hermesProfile → --profile
+  if (employee.hermesProfile?.trim()) {
+    input.profile = employee.hermesProfile.trim();
+  }
+
   // Model: session override > employee model
   const model = overrides?.model ?? employee.model;
   if (model) {
     input.modelPolicy = model;
   }
 
-  // Provider: explicit override only
-  if (overrides?.provider) {
-    input.providerPolicy = overrides.provider;
+  // Provider: explicit override > employee hermesProvider
+  const provider = overrides?.provider ?? employee.hermesProvider;
+  if (provider) {
+    input.providerPolicy = provider;
+  }
+
+  // Toolsets: employee.hermesToolsets → --toolsets
+  if (employee.hermesToolsets?.trim()) {
+    input.toolsets = employee.hermesToolsets.trim();
+  }
+
+  // Skills: employee.hermesSkills → --skills
+  if (employee.hermesSkills?.trim()) {
+    input.skills = employee.hermesSkills.trim();
   }
 
   // MCP: explicit override > employee mcp flag
@@ -86,12 +105,16 @@ export function mapEmployeeToHermesInput(
 export function hermesRunInputToOpts(input: HermesRunInput): {
   hermesProfile?: string;
   hermesProvider?: string;
+  hermesToolsets?: string;
+  hermesSkills?: string;
   model?: string;
   systemPromptAddition?: string;
 } {
   return {
     ...(input.profile ? { hermesProfile: input.profile } : {}),
     ...(input.providerPolicy ? { hermesProvider: input.providerPolicy } : {}),
+    ...(input.toolsets ? { hermesToolsets: input.toolsets } : {}),
+    ...(input.skills ? { hermesSkills: input.skills } : {}),
     ...(input.modelPolicy ? { model: input.modelPolicy } : {}),
     ...(input.systemAddition ? { systemPromptAddition: input.systemAddition } : {}),
   };
