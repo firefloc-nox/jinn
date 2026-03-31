@@ -40,11 +40,19 @@ import { logger } from "../shared/logger.js";
 
 /**
  * Resolve the absolute path of a binary, falling back to the name itself.
- * Uses `which` on Unix so that Node child_process can find it regardless
- * of the inherited PATH.
+ * Special case: "hermes" is resolved to hermes.native when the LACP wrapper
+ * is detected, to avoid LACP intercepting the spawn in non-interactive mode.
  */
 function resolveBin(name: string): string {
   try {
+    // For hermes: prefer hermes.native (sibling of the LACP wrapper) to bypass
+    // LACP TTY detection that would otherwise delegate to claude CLI.
+    if (name === "hermes" || name.endsWith("/hermes")) {
+      const wrapperPath = execFileSync("which", ["hermes"], { encoding: "utf8" }).trim();
+      const nativePath = wrapperPath.replace(/hermes$/, "hermes.native");
+      const fs = require("fs") as typeof import("fs");
+      if (fs.existsSync(nativePath)) return nativePath;
+    }
     return execFileSync("which", [name], { encoding: "utf8" }).trim();
   } catch {
     return name;
