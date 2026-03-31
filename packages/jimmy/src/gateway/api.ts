@@ -373,7 +373,7 @@ function checkInstanceHealth(port: number): Promise<boolean> {
  *   - transportMeta.hermesMeta.hermesSessionId  (HermesEngine direct write)
  *   - transportMeta.routingMeta.hermesRuntimeMeta.hermesSessionId  (routing meta shape)
  */
-async function enrichWithHermesData(
+export async function enrichWithHermesData(
   session: Session,
   hermesConnector: import("../connectors/hermes/index.js").HermesDataConnector | null,
 ): Promise<Session> {
