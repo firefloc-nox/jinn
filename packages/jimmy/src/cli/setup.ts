@@ -238,28 +238,37 @@ function detectProjectContext(portalSlug: string): void {
   }
 }
 
-const DEFAULT_CONFIG = `jinn:
-  version: "${getPackageVersion()}"
-
-gateway:
-  port: 7777
-  host: "127.0.0.1"
-engines:
-  default: claude
-  claude:
-    bin: claude
-    model: opus
-    effortLevel: medium
-  codex:
-    bin: codex
-    model: gpt-5.4
-connectors: {}
-portal: {}
-logging:
-  file: true
-  stdout: true
-  level: info
-`;
+const DEFAULT_CONFIG = [
+  `jinn:`,
+  `  version: "${getPackageVersion()}"`,
+  ``,
+  `gateway:`,
+  `  port: 7777`,
+  `  host: "127.0.0.1"`,
+  `brain:`,
+  `  primary: hermes`,
+  `engines:`,
+  `  default: hermes`,
+  `  hermes:`,
+  `    bin: hermes`,
+  `    model: anthropic/claude-sonnet-4.6`,
+  `  claude:`,
+  `    bin: claude`,
+  `    model: opus`,
+  `    effortLevel: medium`,
+  `  codex:`,
+  `    bin: codex`,
+  `    model: gpt-5.4`,
+  `sessions:`,
+  `  fallbackEngines: [claude, codex]`,
+  `connectors: {}`,
+  `portal: {}`,
+  `logging:`,
+  `  file: true`,
+  `  stdout: true`,
+  `  level: info`,
+  ``,
+].join("\n");
 
 function defaultClaudeMd(portalName: string) {
   return `# ${portalName} AI Gateway
