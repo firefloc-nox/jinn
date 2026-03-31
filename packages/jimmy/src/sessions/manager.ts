@@ -463,7 +463,7 @@ export class SessionManager {
                 : "Claude usage limit — using GPT temporarily",
             });
 
-            const fallbackConfig = this.config.engines.codex;
+            const fallbackConfig = this.config.engines.codex ?? ({} as import("../shared/types.js").EngineConfig);
             const fallbackEffort = resolveEffort(fallbackConfig, session, employee);
             const codexResume = typeof engineSessions.codex === "string" ? (engineSessions.codex as string) : undefined;
             const history = getMessages(session.id)

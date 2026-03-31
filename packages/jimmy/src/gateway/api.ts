@@ -2100,14 +2100,15 @@ async function runWebSession(
     });
 
     // Resolve engine config — hermes must be resolved directly to avoid falling through to claude.
+    const _empty = {} as import("../shared/types.js").EngineConfig;
     const engineConfig: import("../shared/types.js").EngineConfig =
       currentSession.engine === "hermes"
-        ? (config.engines.hermes ?? ({} as import("../shared/types.js").EngineConfig))
+        ? (config.engines.hermes ?? _empty)
         : currentSession.engine === "codex"
-          ? config.engines.codex
+          ? (config.engines.codex ?? _empty)
           : currentSession.engine === "gemini"
-            ? (config.engines.gemini ?? config.engines.hermes ?? config.engines.claude)
-            : (config.engines.hermes ?? config.engines.claude ?? ({} as import("../shared/types.js").EngineConfig));
+            ? (config.engines.gemini ?? config.engines.hermes ?? config.engines.claude ?? _empty)
+            : (config.engines.hermes ?? config.engines.claude ?? _empty);
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     let lastHeartbeatAt = 0;
@@ -2221,7 +2222,7 @@ async function runWebSession(
             `⚠️ Claude usage limit reached. Session ${currentSession.id}${currentSession.employee ? ` (${currentSession.employee})` : ""} switching to GPT.`,
           );
 
-          const fallbackConfig = config.engines.codex;
+          const fallbackConfig = config.engines.codex ?? ({} as import("../shared/types.js").EngineConfig);
           const fallbackEffort = resolveEffort(fallbackConfig, currentSession, employee);
           const codexResume = typeof engineSessions.codex === "string" ? (engineSessions.codex as string) : undefined;
           const history = getMessages(currentSession.id)
