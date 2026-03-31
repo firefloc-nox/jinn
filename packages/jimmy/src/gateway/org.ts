@@ -44,6 +44,10 @@ export function scanOrg(): Map<string, Employee> {
                 ? data.provides.filter((s: unknown) => s && typeof s === "object" && typeof (s as any).name === "string" && typeof (s as any).description === "string")
                   .map((s: any) => ({ name: s.name as string, description: s.description as string }))
                 : undefined,
+              hermesProfile: typeof data.hermesProfile === "string" ? data.hermesProfile : undefined,
+              hermesProvider: typeof data.hermesProvider === "string" ? data.hermesProvider : undefined,
+              hermesToolsets: typeof data.hermesToolsets === "string" ? data.hermesToolsets : undefined,
+              hermesSkills: typeof data.hermesSkills === "string" ? data.hermesSkills : undefined,
             };
             registry.set(employee.name, employee);
           }
