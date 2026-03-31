@@ -2096,11 +2096,15 @@ async function runWebSession(
       hierarchy: orgHierarchy,
     });
 
-    const engineConfig = currentSession.engine === "codex"
-      ? config.engines.codex
-      : currentSession.engine === "gemini"
-        ? config.engines.gemini ?? config.engines.claude
-        : config.engines.claude;
+    // Resolve engine config — hermes must be resolved directly to avoid falling through to claude.
+    const engineConfig: import("../shared/types.js").EngineConfig =
+      currentSession.engine === "hermes"
+        ? (config.engines.hermes ?? ({} as import("../shared/types.js").EngineConfig))
+        : currentSession.engine === "codex"
+          ? config.engines.codex
+          : currentSession.engine === "gemini"
+            ? (config.engines.gemini ?? config.engines.claude)
+            : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     let lastHeartbeatAt = 0;

@@ -278,10 +278,14 @@ export class SessionManager {
         hierarchy,
       });
 
-      // Resolve engine config for the actual executor — dynamic lookup, not hardcoded branches.
-      // Falls back to claude config only for legacy engines (not hermes) when no dedicated config block.
+      // Resolve engine config for the actual executor.
+      // Hermes is resolved directly from this.config.engines.hermes to avoid the generic cast missing it.
+      // Legacy engines fall back to claude config if no dedicated block is present.
       const enginesRecord = this.config.engines as unknown as Record<string, import("../shared/types.js").EngineConfig | undefined>;
-      const engineConfig: import("../shared/types.js").EngineConfig = enginesRecord[resolvedEngine] ?? (resolvedEngine !== "hermes" ? this.config.engines.claude : ({} as import("../shared/types.js").EngineConfig));
+      const engineConfig: import("../shared/types.js").EngineConfig =
+        resolvedEngine === "hermes"
+          ? (this.config.engines.hermes ?? ({} as import("../shared/types.js").EngineConfig))
+          : (enginesRecord[resolvedEngine] ?? this.config.engines.claude ?? ({} as import("../shared/types.js").EngineConfig));
 
       // MCP: skip Jinn-side MCP resolution for Hermes (mcpNative=true) — Hermes manages MCP internally.
       // Only resolve MCP config for legacy engines that need mcpConfigPath.
