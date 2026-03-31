@@ -3,8 +3,9 @@ import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import yaml from "js-yaml";
-import type { CronJob, Engine, IncomingMessage, JinnConfig, Session, Target } from "../shared/types.js";
+import type { CronJob, Engine, HermesSessionEnrichment, IncomingMessage, JinnConfig, Session, Target } from "../shared/types.js";
 import { isInterruptibleEngine } from "../shared/types.js";
 import type { SessionManager } from "../sessions/manager.js";
 import { buildContext } from "../sessions/context.js";
@@ -48,6 +49,14 @@ import { getClaudeExpectedResetAt, recordClaudeRateLimit } from "../shared/usage
 import { loadJobs, saveJobs } from "../cron/jobs.js";
 import { reloadScheduler } from "../cron/scheduler.js";
 import { runCronJob } from "../cron/runner.js";
+import {
+  loadHermesJobs,
+  saveHermesJobs,
+  hermesJobToJinn,
+  jinnJobToHermes,
+  isHermesJob,
+  HERMES_CRON_FILE,
+} from "../cron/hermes-jobs.js";
 import QRCode from "qrcode";
 import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
@@ -353,6 +362,50 @@ function checkInstanceHealth(port: number): Promise<boolean> {
   });
 }
 
+/**
+ * Enriches a Jinn session with Hermes runtime data (tokens, cost, model).
+ * Called on GET /api/sessions/:id when the hermes-data connector is available.
+ * Graceful: returns the plain session unchanged if:
+ *   - no hermesSessionId is found in transportMeta
+ *   - hermesConnector is null or unhealthy
+ *   - the Hermes WebAPI call fails for any reason
+ * Supports two transportMeta shapes:
+ *   - transportMeta.hermesMeta.hermesSessionId  (HermesEngine direct write)
+ *   - transportMeta.routingMeta.hermesRuntimeMeta.hermesSessionId  (routing meta shape)
+ */
+async function enrichWithHermesData(
+  session: Session,
+  hermesConnector: import("../connectors/hermes/index.js").HermesDataConnector | null,
+): Promise<Session> {
+  const meta = session.transportMeta as Record<string, unknown> | null;
+  const hermesSessionId: string | undefined =
+    (meta?.hermesMeta as Record<string, unknown> | undefined)?.hermesSessionId as string | undefined
+    ?? ((meta?.routingMeta as Record<string, unknown> | undefined)?.hermesRuntimeMeta as Record<string, unknown> | undefined)?.hermesSessionId as string | undefined;
+
+  if (!hermesSessionId || !hermesConnector || !hermesConnector.isHealthy()) {
+    return session;
+  }
+
+  try {
+    const hermesSession = await hermesConnector.getClient().getSession(hermesSessionId);
+    const enrichment: HermesSessionEnrichment = {
+      hermesSessionId,
+      model: hermesSession.model,
+      inputTokens: hermesSession.inputTokens,
+      outputTokens: hermesSession.outputTokens,
+      toolCallCount: hermesSession.toolCallCount,
+      messageCount: hermesSession.messageCount,
+      estimatedCostUsd: (hermesSession as unknown as Record<string, unknown>).estimatedCostUsd as number | undefined,
+      startedAt: hermesSession.startedAt,
+      endedAt: hermesSession.endedAt,
+    };
+    return { ...session, hermesData: enrichment };
+  } catch {
+    // Hermes down or session not found — return plain session without hermesData
+    return session;
+  }
+}
+
 export async function handleApiRequest(
   req: HttpRequest,
   res: ServerResponse,
@@ -448,6 +501,61 @@ export async function handleApiRequest(
       return json(res, interrupted.map((session) => serializeSession(session, context)));
     }
 
+    /**
+     * GET /api/sessions/hermes-activity?limit=20
+     *
+     * Aggregated activity view combining Hermes sessions with Jinn metadata.
+     * Returns the N most recent Hermes sessions, enriched with Jinn session data
+     * when a matching hermesSessionId is found in transportMeta.
+     * Requires the hermes-data connector to be healthy; returns 503 otherwise.
+     */
+    if (method === "GET" && pathname === "/api/sessions/hermes-activity") {
+      const hermesConnector = getHermesConnector(context);
+      if (!hermesConnector || !hermesConnector.isHealthy()) {
+        return json(res, { error: "Hermes WebAPI unavailable" }, 503);
+      }
+      const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : 20;
+      const safeLimit = Math.min(Math.max(1, limit), 200);
+
+      // Fetch recent Hermes sessions
+      const hermesList = await hermesConnector.getClient().getSessions({ limit: safeLimit });
+
+      // Build a lookup map: hermesSessionId → Jinn session
+      // Scan all Jinn sessions and index by hermesSessionId from transportMeta
+      const jinnSessions = listSessions();
+      const jinnByHermesId = new Map<string, Session>();
+      for (const s of jinnSessions) {
+        const m = s.transportMeta as Record<string, unknown> | null;
+        const hsid: string | undefined =
+          (m?.hermesMeta as Record<string, unknown> | undefined)?.hermesSessionId as string | undefined
+          ?? ((m?.routingMeta as Record<string, unknown> | undefined)?.hermesRuntimeMeta as Record<string, unknown> | undefined)?.hermesSessionId as string | undefined;
+        if (hsid) jinnByHermesId.set(hsid, s);
+      }
+
+      const items = hermesList.items.map((hs) => {
+        const jinn = jinnByHermesId.get(hs.id);
+        return {
+          hermesSessionId: hs.id,
+          jinnSessionId: jinn?.id,
+          employee: jinn?.employee ?? null,
+          source: hs.source,
+          model: hs.model,
+          inputTokens: hs.inputTokens,
+          outputTokens: hs.outputTokens,
+          startedAt: hs.startedAt,
+          endedAt: hs.endedAt,
+          title: hs.title,
+          // Jinn-only fields — present only when a matching Jinn session is found
+          ...(jinn ? {
+            kanbanTicketId: (jinn.transportMeta as Record<string, unknown> | null)?.kanbanTicketId as string | undefined,
+            workState: jinn.status,
+          } : {}),
+        };
+      });
+
+      return json(res, { items, total: hermesList.total });
+    }
+
     // GET /api/sessions/:id
     let params = matchRoute("/api/sessions/:id", pathname);
     if (method === "GET" && params) {
@@ -472,7 +580,10 @@ export async function handleApiRequest(
         messages = messages.slice(-lastN);
       }
 
-      return json(res, { ...serializeSession(session, context), messages });
+      // Enrich with Hermes data if a hermesSessionId is linked in transportMeta
+      const hermesConnector = getHermesConnector(context);
+      const enrichedSession = await enrichWithHermesData(session, hermesConnector);
+      return json(res, { ...serializeSession(enrichedSession, context), messages });
     }
 
     // PUT /api/sessions/:id
@@ -865,11 +976,25 @@ export async function handleApiRequest(
     }
 
     // GET /api/cron
+    // Source of truth : ~/.hermes/cron/jobs.json (Hermes jobs) + ~/.jinn/cron/jobs.json (Jinn-only)
     if (method === "GET" && pathname === "/api/cron") {
-      const jobs = loadJobs();
-      // Enrich with last run status
-      const enriched = jobs.map((job) => {
-        const runFile = path.join(CRON_RUNS, `${job.id}.jsonl`);
+      // 1. Jobs Hermes — convertis en format Jinn
+      const hermesJobs = loadHermesJobs()
+        .map(hermesJobToJinn)
+        .filter((j): j is NonNullable<typeof j> => j !== null);
+
+      // 2. Jobs Jinn-only — exclure ceux qui ont _source=hermes (résidus d'ancienne sync)
+      const jinnOnlyJobs = loadJobs().filter(
+        (j) => !isHermesJob(j as CronJob & Record<string, unknown>),
+      );
+
+      const allJobs = [...hermesJobs, ...jinnOnlyJobs];
+
+      // Enrich with last run status (cherche dans CRON_RUNS par id natif)
+      const enriched = allJobs.map((job) => {
+        // Pour les jobs Hermes, le log de run est stocké avec l'id natif Hermes
+        const logId = job.id.startsWith("hermes-") ? job.id.slice(7) : job.id;
+        const runFile = path.join(CRON_RUNS, `${logId}.jsonl`);
         let lastRun = null;
         if (fs.existsSync(runFile)) {
           const lines = fs.readFileSync(runFile, "utf-8").trim().split("\n").filter(Boolean);
@@ -897,79 +1022,196 @@ export async function handleApiRequest(
     }
 
     // POST /api/cron — create new cron job
+    // Routing : engine=hermes (ou absent) → ~/.hermes/cron/jobs.json
+    //           engine=claude/codex/gemini  → ~/.jinn/cron/jobs.json
     if (method === "POST" && pathname === "/api/cron") {
       const _parsed = await readJsonBody(req, res);
       if (!_parsed.ok) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const body = _parsed.body as any;
-      const jobs = loadJobs();
-      const newJob: CronJob = {
-        id: body.id || crypto.randomUUID(),
-        name: body.name || "untitled",
-        enabled: body.enabled ?? true,
-        schedule: body.schedule || "0 * * * *",
-        timezone: body.timezone,
-        engine: body.engine,
-        model: body.model,
-        employee: body.employee,
-        prompt: body.prompt || "",
-        delivery: body.delivery,
-      };
-      jobs.push(newJob);
-      saveJobs(jobs);
-      reloadScheduler(jobs);
-      return json(res, newJob, 201);
+
+      const effectiveEngine: string = body.engine || context.getConfig().engines.default || "hermes";
+      const isHermes = effectiveEngine === "hermes";
+
+      if (isHermes) {
+        // Écrire dans ~/.hermes/cron/jobs.json
+        const hermesJobs = loadHermesJobs();
+        const rawId = body.id || crypto.randomUUID();
+        const jinnJob: CronJob = {
+          id: rawId,
+          name: body.name || "untitled",
+          enabled: body.enabled ?? true,
+          schedule: body.schedule || "0 * * * *",
+          timezone: body.timezone,
+          engine: "hermes",
+          model: body.model,
+          employee: body.employee,
+          prompt: body.prompt || "",
+          delivery: body.delivery,
+        };
+        const hermesJob = jinnJobToHermes(jinnJob);
+        hermesJobs.push(hermesJob);
+        saveHermesJobs(hermesJobs);
+        logger.info(`[cron] Created Hermes job "${hermesJob.name}" (${hermesJob.id}) → ${HERMES_CRON_FILE}`);
+        // Retourner au format Jinn avec le préfixe hermes- pour cohérence
+        const responseJob = hermesJobToJinn(hermesJob);
+        return json(res, responseJob ?? jinnJob, 201);
+      } else {
+        // Écrire dans ~/.jinn/cron/jobs.json (comportement original)
+        const jobs = loadJobs();
+        const newJob: CronJob = {
+          id: body.id || crypto.randomUUID(),
+          name: body.name || "untitled",
+          enabled: body.enabled ?? true,
+          schedule: body.schedule || "0 * * * *",
+          timezone: body.timezone,
+          engine: body.engine,
+          model: body.model,
+          employee: body.employee,
+          prompt: body.prompt || "",
+          delivery: body.delivery,
+        };
+        jobs.push(newJob);
+        saveJobs(jobs);
+        reloadScheduler(jobs);
+        logger.info(`[cron] Created Jinn job "${newJob.name}" (${newJob.id}) engine=${newJob.engine}`);
+        return json(res, newJob, 201);
+      }
     }
 
     // PUT /api/cron/:id
+    // Routing : id "hermes-*" ou engine=hermes → ~/.hermes/cron/jobs.json
     params = matchRoute("/api/cron/:id", pathname);
     if (method === "PUT" && params) {
-      const jobs = loadJobs();
-      const idx = jobs.findIndex((j) => j.id === params!.id);
-      if (idx === -1) return notFound(res);
       const _parsed = await readJsonBody(req, res);
       if (!_parsed.ok) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const body = _parsed.body as any;
-      jobs[idx] = { ...jobs[idx], ...body, id: params.id };
-      saveJobs(jobs);
-      reloadScheduler(jobs);
-      return json(res, jobs[idx]);
+      const targetId = params.id;
+
+      if (targetId.startsWith("hermes-") || body.engine === "hermes" || body._source === "hermes") {
+        // Mettre à jour dans ~/.hermes/cron/jobs.json
+        const hermesNativeId = targetId.startsWith("hermes-") ? targetId.slice(7) : targetId;
+        const hermesJobs = loadHermesJobs();
+        const hidx = hermesJobs.findIndex((j) => j.id === hermesNativeId);
+        if (hidx === -1) return notFound(res);
+        const updated = hermesJobs[hidx];
+        // Appliquer les champs modifiables
+        if (body.name !== undefined) updated.name = body.name;
+        if (body.enabled !== undefined) {
+          updated.enabled = body.enabled;
+          updated.state = body.enabled ? "scheduled" : "paused";
+        }
+        if (body.schedule !== undefined) {
+          updated.schedule = { kind: "cron", expr: body.schedule, display: body.schedule };
+          updated.schedule_display = body.schedule;
+        }
+        if (body.prompt !== undefined) updated.prompt = body.prompt;
+        if (body.delivery !== undefined) {
+          updated.deliver = body.delivery
+            ? `${body.delivery.connector}:${body.delivery.channel}`
+            : "local";
+        }
+        hermesJobs[hidx] = updated;
+        saveHermesJobs(hermesJobs);
+        logger.info(`[cron] Updated Hermes job "${updated.name}" (${updated.id})`);
+        return json(res, hermesJobToJinn(updated) ?? updated);
+      } else {
+        // Mettre à jour dans ~/.jinn/cron/jobs.json (comportement original)
+        const jobs = loadJobs();
+        const idx = jobs.findIndex((j) => j.id === targetId);
+        if (idx === -1) return notFound(res);
+        jobs[idx] = { ...jobs[idx], ...body, id: targetId };
+        saveJobs(jobs);
+        reloadScheduler(jobs);
+        return json(res, jobs[idx]);
+      }
     }
 
     // DELETE /api/cron/:id
+    // Routing : id "hermes-*" → ~/.hermes/cron/jobs.json
     params = matchRoute("/api/cron/:id", pathname);
     if (method === "DELETE" && params) {
-      const jobs = loadJobs();
-      const idx = jobs.findIndex((j) => j.id === params!.id);
-      if (idx === -1) return notFound(res);
-      const removed = jobs.splice(idx, 1)[0];
-      saveJobs(jobs);
-      reloadScheduler(jobs);
-      return json(res, { deleted: removed.id, name: removed.name });
+      const targetId = params.id;
+
+      if (targetId.startsWith("hermes-")) {
+        // Supprimer de ~/.hermes/cron/jobs.json
+        const hermesNativeId = targetId.slice(7);
+        const hermesJobs = loadHermesJobs();
+        const hidx = hermesJobs.findIndex((j) => j.id === hermesNativeId);
+        if (hidx === -1) return notFound(res);
+        const removed = hermesJobs.splice(hidx, 1)[0];
+        saveHermesJobs(hermesJobs);
+        logger.info(`[cron] Deleted Hermes job "${removed.name}" (${removed.id})`);
+        return json(res, { deleted: `hermes-${removed.id}`, name: removed.name });
+      } else {
+        // Supprimer de ~/.jinn/cron/jobs.json (comportement original)
+        const jobs = loadJobs();
+        const idx = jobs.findIndex((j) => j.id === targetId);
+        if (idx === -1) return notFound(res);
+        const removed = jobs.splice(idx, 1)[0];
+        saveJobs(jobs);
+        reloadScheduler(jobs);
+        return json(res, { deleted: removed.id, name: removed.name });
+      }
     }
 
     // POST /api/cron/:id/trigger — manually run a cron job now
+    // Pour les jobs Hermes : on force next_run_at dans le passé pour que le scheduler Hermes
+    // les exécute au prochain tick. En parallèle on tente aussi un trigger direct via runCronJob.
     params = matchRoute("/api/cron/:id/trigger", pathname);
     if (method === "POST" && params) {
-      const jobs = loadJobs();
-      const job = jobs.find((j) => j.id === params!.id);
-      if (!job) return notFound(res);
+      const targetId = params.id;
 
-      logger.info(`Manual trigger for cron job "${job.name}" (${job.id})`);
+      if (targetId.startsWith("hermes-")) {
+        // Job Hermes — deux mécanismes : next_run_at dans le passé + runCronJob direct
+        const hermesNativeId = targetId.slice(7);
+        const hermesJobs = loadHermesJobs();
+        const hermesJob = hermesJobs.find((j) => j.id === hermesNativeId);
+        if (!hermesJob) return notFound(res);
 
-      // Fire and forget — respond immediately, run in background
-      runCronJob(job, context.sessionManager, context.getConfig(), context.connectors).catch(
-        (err) => logger.error(`Manual cron trigger failed for "${job.name}": ${err}`)
-      );
+        // Forcer next_run_at = maintenant - 1s pour déclencher au prochain tick Hermes
+        const pastTs = new Date(Date.now() - 1000).toISOString();
+        const hidx = hermesJobs.findIndex((j) => j.id === hermesNativeId);
+        hermesJobs[hidx] = { ...hermesJob, next_run_at: pastTs };
+        saveHermesJobs(hermesJobs);
 
-      return json(res, {
-        triggered: true,
-        jobId: job.id,
-        name: job.name,
-        employee: job.employee,
-        message: `Cron job "${job.name}" triggered manually`,
-      });
+        // Tenter aussi un trigger direct via le runner Jinn (pour delivery immédiat)
+        const jinnJob = hermesJobToJinn(hermesJob);
+        if (jinnJob) {
+          runCronJob(jinnJob, context.sessionManager, context.getConfig(), context.connectors).catch(
+            (err) => logger.error(`Manual Hermes cron trigger failed for "${hermesJob.name}": ${err}`)
+          );
+        }
+
+        logger.info(`[cron] Manual trigger for Hermes job "${hermesJob.name}" (hermes-${hermesNativeId})`);
+        return json(res, {
+          triggered: true,
+          jobId: `hermes-${hermesNativeId}`,
+          name: hermesJob.name,
+          message: `Hermes cron job "${hermesJob.name}" triggered (next_run_at forced)`,
+        });
+      } else {
+        // Job Jinn — comportement original
+        const jobs = loadJobs();
+        const job = jobs.find((j) => j.id === targetId);
+        if (!job) return notFound(res);
+
+        logger.info(`Manual trigger for cron job "${job.name}" (${job.id})`);
+
+        // Fire and forget — respond immediately, run in background
+        runCronJob(job, context.sessionManager, context.getConfig(), context.connectors).catch(
+          (err) => logger.error(`Manual cron trigger failed for "${job.name}": ${err}`)
+        );
+
+        return json(res, {
+          triggered: true,
+          jobId: job.id,
+          name: job.name,
+          employee: job.employee,
+          message: `Cron job "${job.name}" triggered manually`,
+        });
+      }
     }
 
     // GET /api/org
