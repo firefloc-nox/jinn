@@ -11,6 +11,7 @@ import { PageLayout } from "@/components/page-layout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useSettings } from "@/app/settings-provider";
 import { useBreadcrumbs } from "@/context/breadcrumb-context";
+import { NewAgentModal } from "@/components/org/new-agent-modal";
 
 const OrgMap = dynamic(
   () =>
@@ -33,6 +34,7 @@ export default function OrgPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Employee | null>(null);
   const [view, setView] = useState<string>("map");
+  const [showNewAgent, setShowNewAgent] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
 
@@ -42,14 +44,14 @@ export default function OrgPage() {
     api
       .getOrg()
       .then((data: OrgData) => {
-        const coo: Employee = {
+        const coo: Employee = data.coo ?? {
           name: (settings.portalName ?? "Jinn").toLowerCase(),
           displayName: settings.portalName ?? "Jinn",
           department: "",
           rank: "executive",
-          engine: "claude",
-          model: "opus",
-          persona: "COO and AI gateway daemon",
+          engine: "hermes",
+          hermesProfile: "jinn-coo",
+          persona: "COO and AI gateway orchestrator",
         };
         setEmployees([coo, ...data.employees]);
         setHierarchy(data.hierarchy);
@@ -113,13 +115,20 @@ export default function OrgPage() {
             className="h-full flex flex-col"
           >
             {/* Tab bar at top */}
-            <div className="absolute top-[var(--space-4)] left-[var(--space-4)] z-10">
+            <div className="absolute top-[var(--space-4)] left-[var(--space-4)] right-[var(--space-4)] z-10 flex items-center justify-between">
               <TabsList>
                 <TabsTrigger value="map">Map</TabsTrigger>
                 <TabsTrigger value="grid">Grid</TabsTrigger>
                 <TabsTrigger value="list">List</TabsTrigger>
                 <TabsTrigger value="tree">Tree</TabsTrigger>
               </TabsList>
+              <button
+                onClick={() => setShowNewAgent(true)}
+                className="flex items-center gap-[var(--space-1)] px-[var(--space-3)] py-[6px] rounded-[var(--radius-md,10px)] bg-[var(--accent)] text-[var(--accent-contrast,white)] border-none cursor-pointer text-[length:var(--text-caption1)] font-[var(--weight-semibold)]"
+              >
+                <span style={{ fontSize: "14px", lineHeight: 1 }}>+</span>
+                New Agent
+              </button>
             </div>
 
             <TabsContent value="map" className="flex-1">
@@ -195,6 +204,19 @@ export default function OrgPage() {
           <div
             className="fixed inset-0 z-30 lg:hidden bg-black/50"
             onClick={() => setSelected(null)}
+          />
+        )}
+
+        {/* New Agent modal */}
+        {showNewAgent && (
+          <NewAgentModal
+            employees={employees}
+            onClose={() => setShowNewAgent(false)}
+            onCreated={(emp) => {
+              loadData();
+              setShowNewAgent(false);
+              setSelected(emp);
+            }}
           />
         )}
 
