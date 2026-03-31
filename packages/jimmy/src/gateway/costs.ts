@@ -1,3 +1,5 @@
+import path from 'node:path';
+import os from 'node:os';
 import { initDb } from '../sessions/registry.js';
 
 export interface CostSummary {
@@ -5,6 +7,70 @@ export interface CostSummary {
   daily: { date: string; cost: number }[];
   byEmployee: { employee: string; cost: number; sessions: number }[];
   byDepartment: { department: string; cost: number }[];
+}
+
+/**
+ * Hermes-side cost aggregation read directly from ~/.hermes/state.db (readonly).
+ * Returns { totalEstimatedCostUsd, sessionCount, available } where available=false
+ * if the state.db is missing or unreadable (e.g. Hermes not installed / different HERMES_HOME).
+ */
+export interface HermesCostSummary {
+  totalEstimatedCostUsd: number;
+  sessionCount: number;
+  available: boolean;
+}
+
+export function getHermesCostSummary(period: 'day' | 'week' | 'month' = 'month'): HermesCostSummary {
+  const hermesHome = process.env.HERMES_HOME ?? path.join(os.homedir(), '.hermes');
+  const dbPath = path.join(hermesHome, 'state.db');
+
+  let BetterSqlite3: typeof import('better-sqlite3');
+  try {
+    // Dynamic require — better-sqlite3 is already a dep of jimmy (used by Goals)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    BetterSqlite3 = require('better-sqlite3') as typeof import('better-sqlite3');
+  } catch {
+    return { totalEstimatedCostUsd: 0, sessionCount: 0, available: false };
+  }
+
+  let db: import('better-sqlite3').Database;
+  try {
+    db = new BetterSqlite3(dbPath, { readonly: true });
+  } catch {
+    return { totalEstimatedCostUsd: 0, sessionCount: 0, available: false };
+  }
+
+  try {
+    const now = new Date();
+    let cutoffUnix: number;
+    if (period === 'day') {
+      const d = new Date(now); d.setHours(0, 0, 0, 0);
+      cutoffUnix = d.getTime() / 1000;
+    } else if (period === 'week') {
+      const d = new Date(now); d.setDate(d.getDate() - 7);
+      cutoffUnix = d.getTime() / 1000;
+    } else {
+      const d = new Date(now.getFullYear(), now.getMonth(), 1);
+      cutoffUnix = d.getTime() / 1000;
+    }
+
+    // started_at is stored as REAL (Unix timestamp in seconds)
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(estimated_cost_usd), 0) as total, COUNT(*) as count
+      FROM sessions
+      WHERE started_at > ? AND estimated_cost_usd IS NOT NULL
+    `).get(cutoffUnix) as { total: number; count: number };
+
+    return {
+      totalEstimatedCostUsd: row.total ?? 0,
+      sessionCount: row.count ?? 0,
+      available: true,
+    };
+  } catch {
+    return { totalEstimatedCostUsd: 0, sessionCount: 0, available: false };
+  } finally {
+    try { db.close(); } catch { /* best effort */ }
+  }
 }
 
 export function getCostSummary(period: 'day' | 'week' | 'month' = 'month'): CostSummary {
