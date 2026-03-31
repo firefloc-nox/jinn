@@ -2157,7 +2157,9 @@ async function runWebSession(
       systemPrompt,
       cwd: JINN_HOME,
       bin: engineConfig.bin,
-      model: currentSession.model ?? engineConfig.model,
+      model: currentSession.model
+        ?? (currentSession.engine === "hermes" ? config.engines.hermes?.model : undefined)
+        ?? engineConfig.model,
       effortLevel,
       cliFlags: employee?.cliFlags,
       attachments: attachments?.length ? attachments : undefined,
