@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { PageLayout } from "@/components/page-layout"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -20,6 +20,8 @@ import {
   Bot,
   User,
   Cpu,
+  Download,
+  SlidersHorizontal,
 } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -27,6 +29,17 @@ import {
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 20
+
+const SOURCES = ["all", "cli", "discord", "telegram", "jinn"] as const
+type SourceFilter = (typeof SOURCES)[number]
+
+const SORT_OPTIONS = [
+  { value: "date_desc", label: "Newest" },
+  { value: "date_asc", label: "Oldest" },
+  { value: "tokens_desc", label: "Most tokens" },
+  { value: "duration_desc", label: "Longest" },
+] as const
+type SortOption = (typeof SORT_OPTIONS)[number]["value"]
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,6 +69,11 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+function estimateCostUsd(inputTokens: number, outputTokens: number): number {
+  // Rough blended estimate: $3/Mtok input, $15/Mtok output (claude-3 tier)
+  return (inputTokens * 3 + outputTokens * 15) / 1_000_000
+}
+
 // ---------------------------------------------------------------------------
 // Source badge
 // ---------------------------------------------------------------------------
@@ -70,6 +88,7 @@ const SOURCE_STYLES: Record<string, string> = {
     "border-transparent bg-[color-mix(in_srgb,var(--system-green)_18%,transparent)] text-[var(--system-green)]",
   whatsapp:
     "border-transparent bg-[color-mix(in_srgb,var(--system-green)_18%,transparent)] text-[var(--system-green)]",
+  jinn: "border-transparent bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)]",
 }
 
 function SourceBadge({ source }: { source: string }) {
@@ -85,6 +104,166 @@ function SourceBadge({ source }: { source: string }) {
       {source}
     </Badge>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Filter chips
+// ---------------------------------------------------------------------------
+
+function SourceChips({
+  active,
+  onChange,
+}: {
+  active: SourceFilter
+  onChange: (s: SourceFilter) => void
+}) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {SOURCES.map((s) => (
+        <button
+          key={s}
+          onClick={() => onChange(s)}
+          className={cn(
+            "px-2.5 py-0.5 rounded-full text-[length:var(--text-caption1)] font-medium transition-colors capitalize",
+            active === s
+              ? "bg-[var(--accent)] text-white"
+              : "bg-[var(--fill-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--fill-secondary)]"
+          )}
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sort select
+// ---------------------------------------------------------------------------
+
+function SortSelect({
+  value,
+  onChange,
+}: {
+  value: SortOption
+  onChange: (v: SortOption) => void
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <SlidersHorizontal size={12} className="text-[var(--text-tertiary)]" />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as SortOption)}
+        className={cn(
+          "rounded-lg border border-[var(--separator)] bg-[var(--fill-tertiary)]",
+          "py-1 px-2 text-[length:var(--text-caption1)] text-[var(--text-secondary)]",
+          "outline-none focus:border-[var(--accent)]"
+        )}
+      >
+        {SORT_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Stats header bar
+// ---------------------------------------------------------------------------
+
+function StatsBar({
+  sessions,
+  total,
+}: {
+  sessions: HermesSession[]
+  total: number
+}) {
+  const totalInput = sessions.reduce((a, s) => a + s.inputTokens, 0)
+  const totalOutput = sessions.reduce((a, s) => a + s.outputTokens, 0)
+  const totalTokens = totalInput + totalOutput
+  const cost = estimateCostUsd(totalInput, totalOutput)
+
+  return (
+    <div className="shrink-0 flex items-center gap-4 border-b border-[var(--separator)] bg-[var(--bg-secondary)] px-4 py-2 text-[length:var(--text-caption1)] text-[var(--text-tertiary)]">
+      <span>
+        <span className="font-semibold text-[var(--text-secondary)]">{total}</span> sessions
+      </span>
+      {totalTokens > 0 && (
+        <span>
+          <span className="font-semibold text-[var(--text-secondary)]">{formatTokens(totalTokens)}</span> tokens
+        </span>
+      )}
+      {totalTokens > 0 && (
+        <span>
+          ≈ <span className="font-semibold text-[var(--text-secondary)]">${cost.toFixed(4)}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// CSV Export
+// ---------------------------------------------------------------------------
+
+function exportCsv(sessions: HermesSession[]) {
+  const header = "id,source,model,started_at,ended_at,message_count,input_tokens,output_tokens,title"
+  const rows = sessions.map((s) => {
+    const escape = (v: string | null | undefined) => `"${(v ?? "").replace(/"/g, '""')}"`
+    return [
+      escape(s.id),
+      escape(s.source),
+      escape(s.model),
+      new Date(s.startedAt * 1000).toISOString(),
+      s.endedAt ? new Date(s.endedAt * 1000).toISOString() : "",
+      s.messageCount,
+      s.inputTokens,
+      s.outputTokens,
+      escape(s.title),
+    ].join(",")
+  })
+  const csv = [header, ...rows].join("\n")
+  const blob = new Blob([csv], { type: "text/csv" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `hermes-sessions-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ---------------------------------------------------------------------------
+// Client-side filter + sort
+// ---------------------------------------------------------------------------
+
+function applyFilterSort(
+  sessions: HermesSession[],
+  source: SourceFilter,
+  sort: SortOption
+): HermesSession[] {
+  let result = sessions
+  if (source !== "all") {
+    result = result.filter((s) => s.source.toLowerCase() === source)
+  }
+  result = [...result].sort((a, b) => {
+    switch (sort) {
+      case "date_asc":
+        return a.startedAt - b.startedAt
+      case "tokens_desc":
+        return b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens)
+      case "duration_desc": {
+        const da = a.endedAt ? a.endedAt - a.startedAt : Infinity
+        const db = b.endedAt ? b.endedAt - b.startedAt : Infinity
+        return db - da
+      }
+      default: // date_desc
+        return b.startedAt - a.startedAt
+    }
+  })
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -320,16 +499,24 @@ export default function HermesSessionsPage() {
   const [offset, setOffset] = useState(0)
   const [query, setQuery] = useState("")
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all")
+  const [sort, setSort] = useState<SortOption>("date_desc")
 
   // Use search hook when query non-empty, list hook otherwise
   const listResult = useHermesSessions({ limit: PAGE_SIZE, offset })
   const searchResult = useHermesSessionSearch(query)
 
   const isSearching = query.trim().length > 0
-  const sessions: HermesSession[] = isSearching ? searchResult.sessions : listResult.sessions
+  const rawSessions: HermesSession[] = isSearching ? searchResult.sessions : listResult.sessions
   const total = isSearching ? searchResult.total : listResult.total
   const loading = isSearching ? searchResult.loading : listResult.loading
   const unavailable = isSearching ? searchResult.unavailable : listResult.unavailable
+
+  // Client-side filter + sort
+  const sessions = useMemo(
+    () => applyFilterSort(rawSessions, sourceFilter, sort),
+    [rawSessions, sourceFilter, sort]
+  )
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1
@@ -346,6 +533,12 @@ export default function HermesSessionsPage() {
 
   const handleNext = useCallback(() => {
     setOffset((o) => o + PAGE_SIZE)
+    setActiveId(null)
+  }, [])
+
+  const handleSourceChange = useCallback((s: SourceFilter) => {
+    setSourceFilter(s)
+    setOffset(0)
     setActiveId(null)
   }, [])
 
@@ -374,10 +567,31 @@ export default function HermesSessionsPage() {
                 </Badge>
               )}
             </div>
+            {/* Export CSV */}
+            {sessions.length > 0 && (
+              <button
+                onClick={() => exportCsv(sessions)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
+                  "text-[length:var(--text-caption1)] font-medium text-[var(--text-secondary)]",
+                  "transition-colors hover:bg-[var(--fill-secondary)] hover:text-[var(--text-primary)]"
+                )}
+                title="Export visible sessions as CSV"
+              >
+                <Download size={12} />
+                CSV
+              </button>
+            )}
           </div>
 
-          {/* Search */}
-          <div className="shrink-0 border-b border-[var(--separator)] bg-[var(--bg-secondary)] px-4 py-2">
+          {/* Stats bar */}
+          {!loading && !unavailable && sessions.length > 0 && (
+            <StatsBar sessions={sessions} total={total} />
+          )}
+
+          {/* Search + filters */}
+          <div className="shrink-0 border-b border-[var(--separator)] bg-[var(--bg-secondary)] px-4 py-2 flex flex-col gap-2">
+            {/* Search */}
             <div className="relative">
               <Search
                 size={14}
@@ -399,6 +613,12 @@ export default function HermesSessionsPage() {
                   "focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent-fill)]"
                 )}
               />
+            </div>
+
+            {/* Filter chips + sort */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <SourceChips active={sourceFilter} onChange={handleSourceChange} />
+              <SortSelect value={sort} onChange={setSort} />
             </div>
           </div>
 
