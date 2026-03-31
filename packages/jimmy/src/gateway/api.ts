@@ -1212,7 +1212,7 @@ export async function handleApiRequest(
 
     // GET /api/org
     if (method === "GET" && pathname === "/api/org") {
-      if (!fs.existsSync(ORG_DIR)) return json(res, { departments: [], employees: [], hierarchy: { root: null, sorted: [], warnings: [] } });
+      if (!fs.existsSync(ORG_DIR)) return json(res, { departments: [], employees: [], hierarchy: { root: null, sorted: [], warnings: [] }, coo: null });
       const entries = fs.readdirSync(ORG_DIR, { withFileTypes: true });
       const departments = entries
         .filter((e) => e.isDirectory())
@@ -1236,6 +1236,19 @@ export async function handleApiRequest(
         };
       });
 
+      // Build COO synthetic entry from portal config
+      const config = context.getConfig();
+      const portalName = config.portal?.portalName || "Jinn";
+      const cooHermesProfile = config.portal?.hermesProfile || undefined;
+      const coo = {
+        name: portalName.toLowerCase().replace(/\s+/g, "-"),
+        displayName: portalName,
+        rank: "executive" as const,
+        engine: "hermes",
+        hermesProfile: cooHermesProfile,
+        persona: "COO and AI gateway orchestrator",
+      };
+
       return json(res, {
         departments,
         employees,
@@ -1244,6 +1257,7 @@ export async function handleApiRequest(
           sorted: hierarchy.sorted,
           warnings: hierarchy.warnings,
         },
+        coo,
       });
     }
 
