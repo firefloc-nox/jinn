@@ -25,7 +25,7 @@ export interface Employee {
   department: string;
   rank: "executive" | "manager" | "senior" | "employee";
   engine: string;
-  model: string;
+  model?: string;
   persona: string;
   emoji?: string;
   alwaysNotify?: boolean;
@@ -34,6 +34,46 @@ export interface Employee {
   directReports?: string[];
   depth?: number;
   chain?: string[];
+  hermesProfile?: string;
+  hermesProvider?: string;
+  fallbackEngine?: string;
+  mcp?: boolean;
+  honcho?: boolean;
+}
+
+export interface CreateEmployeeRequest {
+  name: string;
+  displayName: string;
+  department?: string;
+  rank: "executive" | "manager" | "senior" | "employee";
+  engine?: string;
+  persona?: string;
+  reportsTo?: string;
+  hermesProfile?: string;
+  hermesProvider?: string;
+  fallbackEngine?: string;
+  mcp?: boolean;
+  honcho?: boolean;
+}
+
+export interface HermesProfileDetail {
+  name: string;
+  exists: boolean;
+  config: {
+    model: string;
+    provider: string;
+    reasoning_effort: string;
+    max_turns: number;
+  };
+  soul: string;
+  agent: string;
+  role_soul?: string;
+}
+
+export interface HermesProfilePatch {
+  soul?: string;
+  agent?: string;
+  config?: Partial<HermesProfileDetail["config"]>;
 }
 
 export interface OrgWarning {
@@ -53,6 +93,7 @@ export interface OrgData {
   departments: string[];
   employees: Employee[];
   hierarchy: OrgHierarchy;
+  coo?: Employee;
 }
 
 export interface HermesRuntimeMeta {
@@ -232,8 +273,20 @@ export const api = {
     post<Record<string, unknown>>(`/api/cron/${id}/trigger`, {}),
   getOrg: () => get<OrgData>("/api/org"),
   getEmployee: (name: string) => get<Employee>(`/api/org/employees/${name}`),
-  updateEmployee: (name: string, data: { alwaysNotify?: boolean }) =>
+  createEmployee: (data: CreateEmployeeRequest) =>
+    post<Employee>("/api/org/employees", data),
+  updateEmployee: (name: string, data: Partial<Employee> & { alwaysNotify?: boolean }) =>
     patch<{ status: string }>(`/api/org/employees/${name}`, data),
+  deleteEmployee: (name: string, deleteHermesProfile?: boolean) =>
+    del<{ status: string }>(`/api/org/employees/${name}${deleteHermesProfile ? "?deleteHermesProfile=true" : ""}`),
+  getHermesProfileDetail: (name: string) =>
+    get<HermesProfileDetail>(`/api/hermes/profiles/${name}`),
+  updateHermesProfile: (name: string, data: HermesProfilePatch) =>
+    patch<{ status: string }>(`/api/hermes/profiles/${name}`, data),
+  createHermesProfile: (name: string, cloneFrom?: string) =>
+    post<{ status: string }>(`/api/hermes/profiles`, { name, cloneFrom }),
+  listHermesProfiles: () =>
+    get<{ profiles: string[] }>("/api/hermes/profiles"),
   getDepartmentBoard: (name: string) =>
     get<Record<string, unknown>>(`/api/org/departments/${name}/board`),
   getSkills: () => get<Record<string, unknown>[]>("/api/skills"),
