@@ -35,6 +35,7 @@
  */
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { InterruptibleEngine, EngineRunOpts, EngineResult, HermesRuntimeMeta } from "../shared/types.js";
 import { logger } from "../shared/logger.js";
 import { HermesWebAPITransport, runViaWebAPI } from "./hermes-webapi.js";
@@ -74,8 +75,7 @@ function resolveBin(name: string): string {
     if (name === "hermes" || name.endsWith("/hermes")) {
       const wrapperPath = execFileSync("which", ["hermes"], { encoding: "utf8" }).trim();
       const nativePath = wrapperPath.replace(/hermes$/, "hermes.native");
-      const fs = require("fs") as typeof import("fs");
-      if (fs.existsSync(nativePath)) return nativePath;
+      if (existsSync(nativePath)) return nativePath;
     }
     return execFileSync("which", [name], { encoding: "utf8" }).trim();
   } catch {
