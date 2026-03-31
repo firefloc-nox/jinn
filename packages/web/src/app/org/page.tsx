@@ -241,6 +241,7 @@ export default function OrgPage() {
                 <EmployeeDetail
                   name={selected.name}
                   prefetched={selected.rank === "executive" ? selected : undefined}
+                  allEmployees={employees}
                 />
               </div>
             </div>

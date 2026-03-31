@@ -6,6 +6,8 @@ import { EmployeeAvatar } from "@/components/ui/employee-avatar";
 import { useSettings } from "@/app/settings-provider";
 import { emojiForName } from "@/lib/emoji-pool";
 import { EmojiPicker } from "@/components/ui/emoji-picker";
+import { Badge } from "@/components/ui/badge";
+import { HermesProfileEditorModal } from "@/components/org/hermes-profile-editor-modal";
 
 interface SessionData {
   id: string;
@@ -47,7 +49,66 @@ function RankBadge({ rank }: { rank: string }) {
   );
 }
 
-export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?: Employee }) {
+const engineStyles: Record<string, string> = {
+  hermes:
+    "border-transparent bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)]",
+  claude:
+    "border-transparent bg-[color-mix(in_srgb,var(--system-orange)_18%,transparent)] text-[var(--system-orange)]",
+  codex:
+    "border-transparent bg-[color-mix(in_srgb,var(--system-green)_18%,transparent)] text-[var(--system-green)]",
+};
+
+function EngineChip({
+  engine,
+  hermesProfile,
+}: {
+  engine: string;
+  hermesProfile?: string;
+}) {
+  const key = (engine || "").toLowerCase();
+  const styleClass =
+    engineStyles[key] ??
+    "border-[var(--separator)] text-[var(--text-secondary)]";
+
+  return (
+    <div className="flex flex-wrap items-center gap-[var(--space-1)]">
+      <Badge
+        variant="outline"
+        className={`px-2.5 py-1 text-[length:var(--text-caption2)] font-[var(--weight-semibold)] ${styleClass}`}
+      >
+        {engine || "hermes"}
+      </Badge>
+      {hermesProfile && (
+        <Badge
+          variant="outline"
+          className="border-[var(--separator)] text-[var(--text-secondary)] px-2.5 py-1 text-[length:var(--text-caption2)]"
+        >
+          {hermesProfile}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+const RANKS = ["employee", "senior", "manager", "executive"] as const;
+
+interface EditState {
+  displayName: string;
+  department: string;
+  rank: Employee["rank"];
+  reportsTo: string;
+  persona: string;
+}
+
+export function EmployeeDetail({
+  name,
+  prefetched,
+  allEmployees,
+}: {
+  name: string;
+  prefetched?: Employee;
+  allEmployees?: Employee[];
+}) {
   const [employee, setEmployee] = useState<Employee | null>(prefetched ?? null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loading, setLoading] = useState(!prefetched);
@@ -56,14 +117,26 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const { settings, setEmployeeOverride } = useSettings();
 
+  // Edit mode
+  const [editing, setEditing] = useState(false);
+  const [editState, setEditState] = useState<EditState | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Hermes profile modal
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
+
   useEffect(() => {
     setPersonaExpanded(false);
+    setEditing(false);
+    setSaveError(null);
 
     if (prefetched) {
       setEmployee(prefetched);
       setLoading(true);
       setError(null);
-      api.getSessions()
+      api
+        .getSessions()
         .then((allSessions) => {
           const empSessions = (allSessions as SessionData[]).filter(
             (s) => s.employee === name || (!s.employee && name === prefetched.name),
@@ -90,6 +163,59 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
       .finally(() => setLoading(false));
   }, [name, prefetched]);
 
+  function startEdit() {
+    if (!employee) return;
+    setEditState({
+      displayName: employee.displayName || "",
+      department: employee.department || "",
+      rank: employee.rank || "employee",
+      reportsTo: Array.isArray(employee.reportsTo)
+        ? employee.reportsTo[0] ?? ""
+        : employee.reportsTo ?? "",
+      persona: employee.persona || "",
+    });
+    setEditing(true);
+    setSaveError(null);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditState(null);
+    setSaveError(null);
+  }
+
+  async function saveEdit() {
+    if (!employee || !editState) return;
+    setSaving(true);
+    setSaveError(null);
+    const prev = { ...employee };
+    const updated: Employee = {
+      ...employee,
+      displayName: editState.displayName,
+      department: editState.department,
+      rank: editState.rank,
+      reportsTo: editState.reportsTo || undefined,
+      persona: editState.persona,
+    };
+    setEmployee(updated); // optimistic
+    try {
+      await api.updateEmployee(employee.name, {
+        displayName: editState.displayName,
+        department: editState.department,
+        rank: editState.rank,
+        reportsTo: editState.reportsTo || undefined,
+        persona: editState.persona,
+      });
+      setEditing(false);
+      setEditState(null);
+    } catch (err) {
+      setEmployee(prev); // rollback
+      setSaveError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-[var(--text-tertiary)] text-[length:var(--text-caption1)]">
@@ -102,7 +228,11 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
     return (
       <div
         className="rounded-[var(--radius-md,12px)] px-[var(--space-4)] py-[var(--space-3)] text-[length:var(--text-caption1)] text-[var(--system-red)]"
-        style={{ background: "color-mix(in srgb, var(--system-red) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--system-red) 30%, transparent)" }}
+        style={{
+          background: "color-mix(in srgb, var(--system-red) 10%, transparent)",
+          border:
+            "1px solid color-mix(in srgb, var(--system-red) 30%, transparent)",
+        }}
       >
         Failed to load employee: {error}
       </div>
@@ -112,12 +242,18 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
   if (!employee) return null;
 
   const rank = employee.rank || "employee";
-  const persona = employee.persona || "";
-  const currentEmoji = settings.employeeOverrides[employee.name]?.emoji || emojiForName(employee.name);
+  const persona = editing ? (editState?.persona ?? "") : (employee.persona || "");
+  const currentEmoji =
+    settings.employeeOverrides[employee.name]?.emoji ||
+    emojiForName(employee.name);
   const truncatedPersona =
     persona.length > 200 && !personaExpanded
       ? persona.slice(0, 200) + "..."
       : persona;
+
+  const otherEmployees = (allEmployees ?? []).filter(
+    (e) => e.name !== employee.name,
+  );
 
   return (
     <div className="flex flex-col gap-[var(--space-6)]">
@@ -135,7 +271,12 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
                 <EmojiPicker
                   current={currentEmoji}
                   onSelect={(emoji) => {
-                    setEmployeeOverride(employee.name, { emoji: emoji === emojiForName(employee.name) ? undefined : emoji });
+                    setEmployeeOverride(employee.name, {
+                      emoji:
+                        emoji === emojiForName(employee.name)
+                          ? undefined
+                          : emoji,
+                    });
                     setShowAvatarPicker(false);
                   }}
                   onClose={() => setShowAvatarPicker(false)}
@@ -143,38 +284,185 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
               )}
             </div>
             <div>
-              <h2 className="text-[length:var(--text-title2)] font-[var(--weight-bold)] tracking-[var(--tracking-tight)] text-[var(--text-primary)] m-0">
-                {employee.displayName || employee.name}
-              </h2>
+              {editing ? (
+                <input
+                  className="text-[length:var(--text-title2)] font-[var(--weight-bold)] tracking-[var(--tracking-tight)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[2px] w-full"
+                  value={editState?.displayName ?? ""}
+                  onChange={(e) =>
+                    setEditState((s) =>
+                      s ? { ...s, displayName: e.target.value } : s,
+                    )
+                  }
+                />
+              ) : (
+                <h2 className="text-[length:var(--text-title2)] font-[var(--weight-bold)] tracking-[var(--tracking-tight)] text-[var(--text-primary)] m-0">
+                  {employee.displayName || employee.name}
+                </h2>
+              )}
               <p className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mt-[2px] mb-0 ml-0 mr-0 font-[family-name:var(--font-mono)]">
                 {employee.name}
               </p>
             </div>
           </div>
-          <RankBadge rank={rank} />
+          <div className="flex items-center gap-[var(--space-2)]">
+            {!editing && <RankBadge rank={rank} />}
+            {editing ? (
+              <>
+                <button
+                  onClick={cancelEdit}
+                  disabled={saving}
+                  className="px-[var(--space-3)] py-[4px] rounded-[var(--radius-sm,6px)] bg-[var(--fill-tertiary)] text-[var(--text-secondary)] border-none cursor-pointer text-[length:var(--text-caption1)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEdit}
+                  disabled={saving}
+                  className="px-[var(--space-3)] py-[4px] rounded-[var(--radius-sm,6px)] bg-[var(--accent)] text-[var(--accent-contrast,white)] border-none cursor-pointer text-[length:var(--text-caption1)] font-[var(--weight-semibold)]"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={startEdit}
+                className="px-[var(--space-3)] py-[4px] rounded-[var(--radius-sm,6px)] bg-[var(--fill-tertiary)] text-[var(--text-secondary)] border-none cursor-pointer text-[length:var(--text-caption1)]"
+              >
+                Edit
+              </button>
+            )}
+          </div>
         </div>
+
+        {saveError && (
+          <div
+            className="mb-[var(--space-3)] px-[var(--space-3)] py-[var(--space-2)] rounded-[var(--radius-sm,6px)] text-[length:var(--text-caption1)] text-[var(--system-red)]"
+            style={{
+              background:
+                "color-mix(in srgb, var(--system-red) 10%, transparent)",
+            }}
+          >
+            {saveError}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-[var(--space-4)]">
           <div>
             <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
               Department
             </p>
-            <p className="text-[length:var(--text-body)] text-[var(--text-primary)] m-0">
-              {employee.department || "None"}
-            </p>
+            {editing ? (
+              <input
+                className="text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[2px] w-full"
+                value={editState?.department ?? ""}
+                onChange={(e) =>
+                  setEditState((s) =>
+                    s ? { ...s, department: e.target.value } : s,
+                  )
+                }
+              />
+            ) : (
+              <p className="text-[length:var(--text-body)] text-[var(--text-primary)] m-0">
+                {employee.department || "None"}
+              </p>
+            )}
           </div>
+          <div>
+            <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
+              Rank
+            </p>
+            {editing ? (
+              <select
+                className="text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[2px] w-full"
+                value={editState?.rank ?? "employee"}
+                onChange={(e) =>
+                  setEditState((s) =>
+                    s
+                      ? {
+                          ...s,
+                          rank: e.target.value as Employee["rank"],
+                        }
+                      : s,
+                  )
+                }
+              >
+                {RANKS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <RankBadge rank={rank} />
+            )}
+          </div>
+        </div>
+
+        {/* Engine row */}
+        <div className="mt-[var(--space-4)] grid grid-cols-2 gap-[var(--space-4)]">
           <div>
             <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
               Engine
             </p>
-            <p className="text-[length:var(--text-body)] text-[var(--text-primary)] m-0">
-              {employee.engine || "claude"}{" "}
-              <span className="text-[var(--text-tertiary)]">
-                / {employee.model || "default"}
-              </span>
-            </p>
+            <EngineChip
+              engine={employee.engine || "hermes"}
+              hermesProfile={employee.hermesProfile}
+            />
           </div>
+          {editing && otherEmployees.length > 0 && (
+            <div>
+              <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
+                Reports To
+              </p>
+              <select
+                className="text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[2px] w-full"
+                value={editState?.reportsTo ?? ""}
+                onChange={(e) =>
+                  setEditState((s) =>
+                    s ? { ...s, reportsTo: e.target.value } : s,
+                  )
+                }
+              >
+                <option value="">— none —</option>
+                {otherEmployees.map((e) => (
+                  <option key={e.name} value={e.name}>
+                    {e.displayName || e.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
+
+        {/* Hermes Profile section */}
+        {employee.hermesProfile && (
+          <div className="mt-[var(--space-4)] pt-[var(--space-4)] border-t border-[var(--separator)]">
+            <div className="flex items-center justify-between mb-[var(--space-2)]">
+              <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] m-0">
+                Hermes Profile
+              </p>
+              <button
+                onClick={() => setShowProfileEditor(true)}
+                className="text-[length:var(--text-caption1)] text-[var(--accent)] bg-none border-none cursor-pointer p-0"
+              >
+                Edit Profile
+              </button>
+            </div>
+            <div className="flex items-center gap-[var(--space-2)]">
+              <Badge
+                variant="outline"
+                className="border-transparent bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)] px-2.5 py-1 text-[length:var(--text-caption1)] font-[var(--weight-semibold)]"
+              >
+                {employee.hermesProfile}
+              </Badge>
+              {employee.hermesProvider && (
+                <span className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)]">
+                  via {employee.hermesProvider}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Notification toggle */}
         <div className="mt-[var(--space-4)] pt-[var(--space-4)] border-t border-[var(--separator)] flex items-center justify-between">
@@ -194,44 +482,64 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
               const newValue = employee.alwaysNotify === false;
               setEmployee({ ...employee, alwaysNotify: newValue });
               try {
-                await api.updateEmployee(employee.name, { alwaysNotify: newValue });
+                await api.updateEmployee(employee.name, {
+                  alwaysNotify: newValue,
+                });
               } catch {
                 setEmployee({ ...employee, alwaysNotify: !newValue });
               }
             }}
             className="relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer rounded-full border-none transition-colors duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             style={{
-              background: employee.alwaysNotify !== false
-                ? "var(--accent, var(--system-green))"
-                : "var(--fill-tertiary)",
+              background:
+                employee.alwaysNotify !== false
+                  ? "var(--accent, var(--system-green))"
+                  : "var(--fill-tertiary)",
             }}
           >
             <span
               className="pointer-events-none inline-block h-[20px] w-[20px] rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out"
               style={{
-                transform: employee.alwaysNotify !== false
-                  ? "translate(22px, 2px)"
-                  : "translate(2px, 2px)",
+                transform:
+                  employee.alwaysNotify !== false
+                    ? "translate(22px, 2px)"
+                    : "translate(2px, 2px)",
               }}
             />
           </button>
         </div>
 
-        {persona && (
+        {/* Persona */}
+        {(persona || editing) && (
           <div className="mt-[var(--space-4)] pt-[var(--space-4)] border-t border-[var(--separator)]">
             <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
               Persona
             </p>
-            <p className="text-[length:var(--text-body)] text-[var(--text-secondary)] leading-[var(--leading-relaxed)] whitespace-pre-wrap m-0">
-              {truncatedPersona}
-            </p>
-            {persona.length > 200 && (
-              <button
-                onClick={() => setPersonaExpanded(!personaExpanded)}
-                className="text-[length:var(--text-caption1)] text-[var(--accent)] bg-none border-none cursor-pointer p-0 mt-[var(--space-1)]"
-              >
-                {personaExpanded ? "Show less" : "Show more"}
-              </button>
+            {editing ? (
+              <textarea
+                className="w-full text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[var(--space-2)] resize-y"
+                rows={4}
+                value={editState?.persona ?? ""}
+                onChange={(e) =>
+                  setEditState((s) =>
+                    s ? { ...s, persona: e.target.value } : s,
+                  )
+                }
+              />
+            ) : (
+              <>
+                <p className="text-[length:var(--text-body)] text-[var(--text-secondary)] leading-[var(--leading-relaxed)] whitespace-pre-wrap m-0">
+                  {truncatedPersona}
+                </p>
+                {persona.length > 200 && (
+                  <button
+                    onClick={() => setPersonaExpanded(!personaExpanded)}
+                    className="text-[length:var(--text-caption1)] text-[var(--accent)] bg-none border-none cursor-pointer p-0 mt-[var(--space-1)]"
+                  >
+                    {personaExpanded ? "Show less" : "Show more"}
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -292,6 +600,14 @@ export function EmployeeDetail({ name, prefetched }: { name: string; prefetched?
           </div>
         )}
       </div>
+
+      {/* Hermes Profile Editor modal */}
+      {showProfileEditor && employee.hermesProfile && (
+        <HermesProfileEditorModal
+          profileName={employee.hermesProfile}
+          onClose={() => setShowProfileEditor(false)}
+        />
+      )}
     </div>
   );
 }
