@@ -108,6 +108,89 @@ The CLI sends commands to the gateway daemon. The daemon dispatches work to AI
 engines (Claude Code, Codex, Gemini CLI), manages connector integrations, runs
 scheduled cron jobs, and serves the web dashboard.
 
+## 🧠 Hermes-first engine
+
+Starting with the Hermes-first refactor, **Hermes is the default brain** when available.
+
+| Engine | Role |
+|--------|------|
+| **Hermes** | Primary brain — MCP-native, session-resumable, default when installed |
+| Claude Code | Fallback #1 — streaming, cost tracking, Max subscription support |
+| Codex | Fallback #2 — OpenAI GPT-based |
+| Gemini CLI | Fallback #3 — Google Gemini |
+
+### How it works
+
+1. `jinn setup` detects if `hermes` is in your PATH (`hermes --version`)
+2. If found, it sets `engines.default: hermes` in `~/.jinn/config.yaml`
+3. The session manager routes all new sessions to Hermes by default
+4. If Hermes is unavailable, the fallback chain is tried in order: `claude → codex → gemini`
+5. Session metadata tracks `requestedBrain`, `actualExecutor`, and `fallbackUsed`
+
+### Config example with Hermes
+
+```yaml
+# Primary brain + fallback policy (optional — defaults to hermes-first)
+brain:
+  primary: hermes
+  fallbacks: [claude, codex, gemini]
+  fallbackOnUnavailable: true
+
+engines:
+  default: hermes
+  hermes:
+    bin: hermes
+    model: default
+  claude:
+    bin: claude
+    model: opus
+  codex:
+    bin: codex
+    model: gpt-5.4
+
+sessions:
+  # Ordered fallback chain used when the primary engine is unavailable
+  fallbackEngines: [claude, codex, gemini]
+```
+
+Claude, Codex, and Gemini remain fully supported as fallback engines.
+
+### Per-employee Hermes profiles
+
+Employees can be configured with Hermes-specific overrides in `org/*.yaml`:
+
+```yaml
+name: backend-agent
+engine: hermes
+hermesProfile: coder        # activate a named Hermes profile
+hermesProvider: anthropic   # provider override (e.g. openrouter)
+model: claude-opus-4        # model hint passed to Hermes
+```
+
+### Session metadata (hermesRuntimeMeta)
+
+When Hermes executes a session, the following metadata is available via the API
+and surfaced as badges in the web dashboard:
+
+| Field | Description |
+|-------|-------------|
+| `hermesSessionId` | Native Hermes session ID for continuity / resume |
+| `activeProfile` | Active Hermes profile name |
+| `providerUsed` | Provider actually used (e.g. `anthropic`, `openrouter`) |
+| `modelUsed` | Model actually used |
+| `honchoActive` | Whether Honcho memory was active |
+
+The routing decision is also recorded in `routingMeta`:
+
+| Field | Description |
+|-------|-------------|
+| `requestedBrain` | Engine that was requested |
+| `actualExecutor` | Engine that ran the session |
+| `fallbackUsed` | Whether the primary was unavailable and a fallback ran |
+| `fallbackReason` | Human-readable reason for the fallback |
+
+See [docs/hermes-migration.md](docs/hermes-migration.md) for the full migration guide.
+
 ## ⚙️ Configuration
 
 Jinn reads its configuration from `~/.jinn/config.yaml`. An example:
@@ -204,7 +287,7 @@ Jinn is under active development. Here's what's coming:
 ### 🧠 Engines
 - [x] **Gemini CLI** — Google's Gemini as a third engine option
 - [ ] **Local models** — Ollama / llama.cpp integration for offline use
-- [ ] **Engine fallback chains** — auto-failover when primary engine is unavailable
+- [x] **Engine fallback chains** — auto-failover when primary engine is unavailable (Hermes-first)
 
 ### 👥 Org System
 - [x] **Agent-to-agent messaging** — direct communication without board intermediary

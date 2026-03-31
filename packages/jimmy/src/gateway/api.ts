@@ -342,15 +342,46 @@ export async function handleApiRequest(
       const connectors = Object.fromEntries(
         Array.from(context.connectors.values()).map((connector) => [connector.name, connector.getHealth()]),
       );
+
+      // Build registered engines list dynamically (hermes included if configured)
+      const registeredEngines: Record<string, { model: string; available: boolean }> = {
+        claude: { model: config.engines.claude.model, available: true },
+        codex: { model: config.engines.codex.model, available: true },
+      };
+      if (config.engines.gemini) {
+        registeredEngines.gemini = { model: config.engines.gemini.model, available: true };
+      }
+      if (config.engines.hermes) {
+        registeredEngines.hermes = { model: config.engines.hermes.model, available: true };
+      }
+
+      // Determine effective default brain: prefer hermes if configured, else config.engines.default
+      const defaultBrain: string =
+        config.brain?.primary ??
+        (config.engines.hermes ? "hermes" : config.engines.default);
+
       return json(res, {
         status: "ok",
         uptime: Math.floor((Date.now() - context.startTime) / 1000),
         port: config.gateway.port || 7777,
         engines: {
           default: config.engines.default,
+          defaultBrain,
+          registered: registeredEngines,
+          // Legacy fields for backwards compat
           claude: { model: config.engines.claude.model, available: true },
           codex: { model: config.engines.codex.model, available: true },
           ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
+          ...(config.engines.hermes ? { hermes: { model: config.engines.hermes.model, available: true } } : {}),
+        },
+        brain: {
+          primary: defaultBrain,
+          fallbacks: config.brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
+        },
+        // fallbackPolicy aliases brain for backwards compatibility with clients that consumed the old shape
+        fallbackPolicy: {
+          primary: defaultBrain,
+          fallbacks: config.brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
@@ -2065,11 +2096,15 @@ async function runWebSession(
       hierarchy: orgHierarchy,
     });
 
-    const engineConfig = currentSession.engine === "codex"
-      ? config.engines.codex
-      : currentSession.engine === "gemini"
-        ? config.engines.gemini ?? config.engines.claude
-        : config.engines.claude;
+    // Resolve engine config — hermes must be resolved directly to avoid falling through to claude.
+    const engineConfig: import("../shared/types.js").EngineConfig =
+      currentSession.engine === "hermes"
+        ? (config.engines.hermes ?? ({} as import("../shared/types.js").EngineConfig))
+        : currentSession.engine === "codex"
+          ? config.engines.codex
+          : currentSession.engine === "gemini"
+            ? (config.engines.gemini ?? config.engines.claude)
+            : config.engines.claude;
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     let lastHeartbeatAt = 0;

@@ -1,5 +1,17 @@
 export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error";
 
+/** Known engine identifiers. Open string allows future engines without breaking existing callers. */
+export type EngineType = "hermes" | "claude" | "codex" | "gemini" | (string & {});
+
+/**
+ * Brain policy — declares the primary brain and ordered fallback chain.
+ * Intended for future use when a session can declare its own fallback policy.
+ */
+export interface BrainPolicy {
+  primary: EngineType;
+  fallbacks: EngineType[];
+}
+
 export interface StreamDelta {
   type: StreamDeltaType;
   content: string;
@@ -41,6 +53,22 @@ export interface EngineRunOpts {
   onStream?: (delta: StreamDelta) => void;
   /** Unique Jinn session ID for tracking the spawned process. */
   sessionId?: string;
+  /**
+   * Hermes-specific: profile name to activate for this session.
+   * Maps to a named Hermes profile (future V2 — not used in V1 spawn).
+   */
+  hermesProfile?: string;
+  /**
+   * Hermes-specific: provider override (e.g. "anthropic", "openrouter").
+   * Passed as --provider to hermes chat if set.
+   */
+  hermesProvider?: string;
+  /**
+   * Hermes-specific: additional text appended to the system prompt (V1 — prefix injection).
+   * Maps from employee.persona via profile-mapper.
+   * V1.1 plan: pass as --append-system-prompt when upstream Hermes CLI supports it.
+   */
+  systemPromptAddition?: string;
 }
 
 export interface EngineResult {
@@ -55,6 +83,41 @@ export interface EngineResult {
    * `resetsAt` is a Unix timestamp in seconds.
    */
   rateLimit?: EngineRateLimitInfo;
+  /**
+   * Hermes-specific runtime metadata surfaced from engine output.
+   * Present only when the Hermes engine was used.
+   */
+  hermesMeta?: HermesRuntimeMeta;
+}
+
+/** Runtime metadata produced by HermesEngine and propagated to session/API. */
+export interface HermesRuntimeMeta {
+  /** Native Hermes session ID (from `session_id: <id>` in stdout) */
+  hermesSessionId?: string;
+  /** Active Hermes profile name */
+  activeProfile?: string;
+  /** Provider actually used (e.g. "anthropic", "openrouter") */
+  providerUsed?: string;
+  /** Model actually used */
+  modelUsed?: string;
+  /** Whether Honcho memory was active */
+  honchoActive?: boolean;
+}
+
+/**
+ * Brain routing metadata — records the Jinn-side routing decision for a session.
+ * Produced by resolveFallbackExecutor() in sessions/fallback.ts.
+ * Always present in transportMeta["routingMeta"] after engine.run(), regardless of which executor was used.
+ */
+export interface BrainRoutingMeta {
+  /** The requested brain engine (may differ from actualExecutor when fallback triggered) */
+  requestedBrain: string;
+  /** The engine that actually executed the session */
+  actualExecutor: string;
+  /** Whether the primary brain was unavailable and a fallback was used */
+  fallbackUsed: boolean;
+  /** Human-readable reason for the fallback, if applicable */
+  fallbackReason?: string;
 }
 
 export interface EngineRateLimitInfo {
@@ -375,14 +438,30 @@ export interface PortalConfig {
   onboarded?: boolean;
 }
 
+/** Per-engine configuration block shared across all engine types. */
+export interface EngineConfig {
+  bin: string;
+  model: string;
+  effortLevel?: string;
+  childEffortOverride?: string;
+}
+
 export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
+  /**
+   * Brain fallback policy — declares the primary brain and fallback chain.
+   * When absent, defaults to hermes-first (see DEFAULT_FALLBACK_POLICY in sessions/fallback.ts).
+   */
+  brain?: import("../sessions/fallback.js").FallbackPolicy;
   engines: {
-    default: "claude" | "codex" | "gemini";
-    claude: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
-    codex: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
-    gemini?: { bin: string; model: string; effortLevel?: string; childEffortOverride?: string };
+    /** Default engine name. Open string — not restricted to known engines. */
+    default: EngineType;
+    claude: EngineConfig;
+    codex: EngineConfig;
+    gemini?: EngineConfig;
+    /** Hermes brain engine configuration. */
+    hermes?: EngineConfig;
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;
@@ -401,8 +480,18 @@ export interface JinnConfig {
     interruptOnNewMessage?: boolean;
     /** What to do when Claude hits a usage/rate limit. Default: "fallback" */
     rateLimitStrategy?: "wait" | "fallback";
-    /** Engine to use when rateLimitStrategy="fallback". Default: "codex" */
-    fallbackEngine?: "codex";
+    /**
+     * Engine to use when rateLimitStrategy="fallback". Default: "codex".
+     * Accepts any engine name registered in config.engines.
+     */
+    fallbackEngine?: EngineType;
+    /**
+     * Ordered list of fallback engines. When the primary engine fails,
+     * Jinn tries each in order. Supersedes the singular fallbackEngine
+     * when both are set (fallbackEngines takes precedence).
+     * V1: single-level fallback only — first entry is used.
+     */
+    fallbackEngines?: EngineType[];
   };
   cron?: {
     defaultDelivery?: CronDelivery;

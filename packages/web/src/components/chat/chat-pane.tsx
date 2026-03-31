@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { api } from '@/lib/api'
+import { api, type SessionRecord } from '@/lib/api'
 import { ChatMessages } from '@/components/chat/chat-messages'
 import { ChatInput } from '@/components/chat/chat-input'
 import { ChatEmployeePicker } from '@/components/chat/chat-employee-picker'
@@ -11,6 +11,8 @@ import { buildNewSessionParams } from '@/components/chat/new-chat-helpers'
 import type { Employee } from '@/lib/api'
 import type { Message, MediaAttachment } from '@/lib/conversations'
 import { saveIntermediateMessages, loadIntermediateMessages, clearIntermediateMessages } from '@/lib/conversations'
+import { RuntimeBadges } from '@/components/hermes/runtime-badges'
+import { getFallbackBannerText, getSessionRuntimeMeta } from '@/lib/runtime-meta'
 
 type Listener = (event: string, payload: unknown) => void
 
@@ -72,7 +74,7 @@ export function ChatPane({
   const streamingTextRef = useRef('')
   const [streamingText, setStreamingText] = useState('')
   const intermediateStartRef = useRef<number>(-1)
-  const [currentSession, setCurrentSession] = useState<Record<string, unknown> | null>(null)
+  const [currentSession, setCurrentSession] = useState<SessionRecord | null>(null)
   const sessionIdRef = useRef(sessionId)
 
   // Employee picker state for new chat
@@ -249,7 +251,7 @@ export function ChatPane({
   // Load session data
   const loadSession = useCallback(async (id: string) => {
     try {
-      const session = (await api.getSession(id)) as Record<string, unknown>
+      const session = await api.getSession(id)
       setCurrentSession(session)
       const meta = {
         engine: session.engine ? String(session.engine) : undefined,
@@ -336,7 +338,7 @@ export function ChatPane({
     if (!sessionId || !loading) return
     const timer = setInterval(async () => {
       try {
-        const session = (await api.getSession(sessionId)) as Record<string, unknown>
+        const session = await api.getSession(sessionId)
         if (session.status !== 'running') {
           await loadSession(sessionId)
           setLoading(false)
@@ -438,7 +440,7 @@ export function ChatPane({
     }
 
     try {
-      const session = (await api.getSession(sessionId)) as Record<string, unknown>
+      const session = await api.getSession(sessionId)
       const info = [
         '**Session Info**',
         `ID: \`${session.id}\``,
@@ -522,6 +524,9 @@ export function ChatPane({
     }
   }, [])
 
+  const { hermesRuntimeMeta, routingMeta } = getSessionRuntimeMeta(currentSession)
+  const fallbackBanner = getFallbackBannerText(hermesRuntimeMeta, routingMeta)
+
   return (
     <div
       style={{
@@ -584,6 +589,27 @@ export function ChatPane({
             onSelect={setSelectedEmployee}
             portalName={portalName}
           />
+        </div>
+      )}
+
+      {sessionId && (routingMeta || hermesRuntimeMeta) && (
+        <div className="border-b border-[var(--separator)] px-[var(--space-4)] py-[var(--space-3)] bg-[var(--material-thin)]">
+          <RuntimeBadges
+            requestedBrain={routingMeta?.requestedBrain ?? currentSession?.engine}
+            actualExecutor={routingMeta?.actualExecutor ?? currentSession?.engine}
+            hermesRuntimeMeta={hermesRuntimeMeta}
+          />
+          {fallbackBanner && (
+            <div
+              className="mt-2 rounded-[var(--radius-sm,8px)] px-[var(--space-3)] py-[var(--space-2)] text-[length:var(--text-caption1)] text-[var(--system-orange)]"
+              style={{
+                background: 'color-mix(in srgb, var(--system-orange) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--system-orange) 24%, transparent)',
+              }}
+            >
+              {fallbackBanner}
+            </div>
+          )}
         </div>
       )}
 
