@@ -214,6 +214,23 @@ export interface Target {
   replyContext?: ReplyContext;
 }
 
+/**
+ * Hermes runtime data enriched onto a Jinn session when a hermesSessionId is present.
+ * Populated by enrichWithHermesData() in api.ts on GET /api/sessions/:id.
+ * All numeric fields default to 0 when Hermes has no data; optional fields absent when unavailable.
+ */
+export interface HermesSessionEnrichment {
+  hermesSessionId: string;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  toolCallCount: number;
+  messageCount: number;
+  estimatedCostUsd?: number;
+  startedAt: number;
+  endedAt: number | null;
+}
+
 export interface Session {
   id: string;
   engine: string;
@@ -238,6 +255,8 @@ export interface Session {
   createdAt: string;
   lastActivity: string;
   lastError: string | null;
+  /** Present on GET /api/sessions/:id when the session is linked to a Hermes session. */
+  hermesData?: HermesSessionEnrichment;
 }
 
 export interface Goal {
