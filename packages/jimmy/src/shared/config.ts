@@ -12,10 +12,23 @@ export function loadConfig(): JinnConfig {
   const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
   const config = yaml.load(raw) as JinnConfig;
 
-  // Hermes-first default: if no brain/defaultEngine is set, prefer hermes when available.
-  // Falls back to claude if hermes is not configured.
+  // Hermes-first: engines.default is always "hermes" when not explicitly set.
+  // The hermes block may be absent (user deleted it) but the default still points to hermes
+  // so the fallback policy in sessions/fallback.ts can decide at runtime.
   if (!config.engines.default) {
-    config.engines.default = config.engines.hermes ? "hermes" : "claude";
+    config.engines.default = "hermes";
+  }
+
+  // Ensure brain block exists with primary: hermes when absent from config file.
+  if (!config.brain) {
+    config.brain = {
+      primary: "hermes",
+      fallbacks: ["claude", "codex"],
+      fallbackOnUnavailable: true,
+      fallbackOnHardFailure: true,
+    };
+  } else if (!config.brain.primary) {
+    config.brain.primary = "hermes";
   }
 
   // Provide a safe default for logging so missing section doesn't crash at runtime.
