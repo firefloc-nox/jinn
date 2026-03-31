@@ -9,6 +9,7 @@ import {
   Settings,
   History,
   Brain,
+  BookOpen,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -32,4 +33,5 @@ export const NAV_ITEMS: NavItem[] = [
   // Hermes section
   { href: "/hermes/sessions", label: "H · Sessions", icon: History, group: "hermes" },
   { href: "/hermes/memory", label: "H · Memory", icon: Brain, group: "hermes" },
+  { href: "/hermes/skills", label: "H · Skills", icon: BookOpen, group: "hermes" },
 ]
