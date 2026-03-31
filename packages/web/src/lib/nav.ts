@@ -7,6 +7,8 @@ import {
   Activity,
   Zap,
   Settings,
+  History,
+  Brain,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -14,6 +16,8 @@ export interface NavItem {
   href: string
   label: string
   icon: LucideIcon
+  /** Optional visual group — used to render a separator before the first item of a new group */
+  group?: string
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -25,4 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/logs", label: "Activity", icon: Activity },
   { href: "/skills", label: "Skills", icon: Zap },
   { href: "/settings", label: "Settings", icon: Settings },
+  // Hermes section
+  { href: "/hermes/sessions", label: "H · Sessions", icon: History, group: "hermes" },
+  { href: "/hermes/memory", label: "H · Memory", icon: Brain, group: "hermes" },
 ]

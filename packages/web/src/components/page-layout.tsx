@@ -63,24 +63,30 @@ function MobileHeader({ actions }: { actions?: React.ReactNode }) {
               </button>
             </div>
             <div className="flex flex-1 flex-col gap-1 p-2">
-              {NAV_ITEMS.map((item) => {
+              {NAV_ITEMS.map((item, idx) => {
                 const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
                 const Icon = item.icon
+                const prevGroup = idx > 0 ? NAV_ITEMS[idx - 1].group : undefined
+                const showSeparator = item.group && item.group !== prevGroup
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setOpen(false)}
-                    className={cn(
-                      "flex h-11 items-center gap-3 rounded-[10px] px-3.5 text-[15px] transition-colors",
-                      isActive
-                        ? "bg-[var(--accent-fill)] font-semibold text-[var(--accent)]"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  <div key={item.href}>
+                    {showSeparator && (
+                      <div className="my-1 h-px bg-[var(--separator)]" />
                     )}
-                  >
-                    <Icon size={18} className="shrink-0" />
-                    {item.label}
-                  </Link>
+                    <Link
+                      href={item.href}
+                      onClick={() => setOpen(false)}
+                      className={cn(
+                        "flex h-11 items-center gap-3 rounded-[10px] px-3.5 text-[15px] transition-colors",
+                        isActive
+                          ? "bg-[var(--accent-fill)] font-semibold text-[var(--accent)]"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      )}
+                    >
+                      <Icon size={18} className="shrink-0" />
+                      {item.label}
+                    </Link>
+                  </div>
                 )
               })}
             </div>

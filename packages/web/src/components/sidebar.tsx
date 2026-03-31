@@ -79,29 +79,41 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5 px-2">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.map((item, idx) => {
           const isActive =
             item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
           const Icon = item.icon
+          // Render a thin separator before the first item of a new group
+          const prevGroup = idx > 0 ? NAV_ITEMS[idx - 1].group : undefined
+          const showSeparator = item.group && item.group !== prevGroup
 
           return (
-            <a
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "group flex h-10 items-center gap-2.5 rounded-md px-3 text-[13px] whitespace-nowrap transition-colors",
-                isActive
-                  ? "bg-[var(--accent-fill)] font-semibold text-[var(--accent)]"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            <div key={item.href}>
+              {showSeparator && (
+                <div
+                  className={cn(
+                    "my-1 h-px bg-[var(--separator)] transition-opacity duration-200",
+                    hovered ? "opacity-100" : "opacity-0"
+                  )}
+                />
               )}
-              aria-label={item.label}
-              aria-current={isActive ? "page" : undefined}
-            >
-              <Icon size={18} className="shrink-0" />
-              <span className={cn("transition-opacity duration-200", hovered ? "opacity-100" : "opacity-0")}>
-                {item.label}
-              </span>
-            </a>
+              <a
+                href={item.href}
+                className={cn(
+                  "group flex h-10 items-center gap-2.5 rounded-md px-3 text-[13px] whitespace-nowrap transition-colors",
+                  isActive
+                    ? "bg-[var(--accent-fill)] font-semibold text-[var(--accent)]"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+                aria-label={item.label}
+                aria-current={isActive ? "page" : undefined}
+              >
+                <Icon size={18} className="shrink-0" />
+                <span className={cn("transition-opacity duration-200", hovered ? "opacity-100" : "opacity-0")}>
+                  {item.label}
+                </span>
+              </a>
+            </div>
           )
         })}
       </nav>
