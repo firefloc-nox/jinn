@@ -333,7 +333,11 @@ export function parseHermesOutput(
   }
 
   const resultLines = sessionLineIndex >= 0 ? lines.slice(0, sessionLineIndex) : lines;
-  const result = resultLines.join("\n").trim();
+  // Strip Rich/box-drawing lines produced by the response box when --quiet doesn't suppress them
+  // (e.g. "╭─ ✦ Lain ───╮", "│ ...", "╰───╯", "\r" only lines)
+  const BOX_LINE_RE = /^[\s\r]*[╭╰│╮╯─┤├]|^\s*$/;
+  const cleanLines = resultLines.filter(l => !BOX_LINE_RE.test(l));
+  const result = cleanLines.join("\n").trim();
 
   return { result, sessionId, hermesMeta: meta };
 }
