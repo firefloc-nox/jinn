@@ -34,8 +34,11 @@ export async function runCronJob(
 
   try {
     const effectiveEngine = job.engine || employee?.engine || config.engines.default || "hermes";
-    const effectiveModel = job.model || employee?.model ||
-      (config.engines as Record<string, { model?: string } | undefined>)[effectiveEngine]?.model;
+    const effectiveModel = job.model
+      || employee?.model
+      || (effectiveEngine === "hermes"
+        ? config.engines.hermes?.model
+        : (config.engines as Record<string, { model?: string } | undefined>)[effectiveEngine]?.model);
 
     const routeResult = await sessionManager.route(
       {
