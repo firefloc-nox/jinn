@@ -4,7 +4,7 @@
 const BASE =
   typeof window !== "undefined"
     ? window.location.origin
-    : "http://127.0.0.1:7777"
+    : `http://127.0.0.1:${process.env.JINN_PORT ?? "7778"}`
 
 // ---------------------------------------------------------------------------
 // Types

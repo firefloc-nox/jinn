@@ -2189,7 +2189,8 @@ Handle this as a priority request from a colleague.`;
       const target = body.target as "memory" | "user" | undefined;
       const action = body.action as "add" | "replace" | "remove" | undefined;
       const content = body.content as string | undefined;
-      const old_text = body.old_text as string | undefined;
+      // Accept both camelCase (frontend) and snake_case (API convention)
+      const old_text = (body.old_text ?? body.oldText) as string | undefined;
       if (!target || !action || content == null) {
         return badRequest(res, "Required fields: target, action, content");
       }
