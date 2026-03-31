@@ -26,6 +26,7 @@ import {
   cancelAllPendingQueueItems,
   listAllPendingQueueItems,
   getFile,
+  accumulateSessionCost,
 } from "../sessions/registry.js";
 import { forkEngineSession } from "../sessions/fork.js";
 import {
@@ -247,7 +248,34 @@ function serverError(res: ServerResponse, message: string): void {
   json(res, { error: message }, 500);
 }
 
-const SANITIZED_KEYS = new Set(["token", "botToken", "signingSecret", "appToken"]);
+const SANITIZED_KEYS = new Set([
+  "token", "botToken", "signingSecret", "appToken",
+  "apiKey", "api_key", "password", "secret", "privateKey",
+  "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "OPENAI_API_KEY",
+]);
+
+/**
+ * Recursively sanitize an object: replace values for keys in SANITIZED_KEYS with "***".
+ * Arrays are recursed element-by-element. Primitives are returned as-is.
+ * Secrets are only masked when their value is a non-empty string (no null/undefined masking).
+ */
+function sanitizeSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeSecrets);
+  }
+  if (value !== null && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (SANITIZED_KEYS.has(k) && typeof v === "string" && v.length > 0) {
+        result[k] = "***";
+      } else {
+        result[k] = sanitizeSecrets(v);
+      }
+    }
+    return result;
+  }
+  return value;
+}
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
   const result = { ...target };
@@ -1001,7 +1029,7 @@ export async function handleApiRequest(
       });
     }
 
-    // PATCH /api/org/employees/:name — update employee fields (currently only alwaysNotify)
+    // PATCH /api/org/employees/:name — update employee fields
     params = matchRoute("/api/org/employees/:name", pathname);
     if (method === "PATCH" && params) {
       const _parsed = await readJsonBody(req, res);
@@ -1010,6 +1038,10 @@ export async function handleApiRequest(
       const { updateEmployeeYaml } = await import("./org.js");
       const updated = updateEmployeeYaml(params.name, {
         alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
+        hermesProfile: typeof body.hermesProfile === "string" ? body.hermesProfile : undefined,
+        hermesProvider: typeof body.hermesProvider === "string" ? body.hermesProvider : undefined,
+        hermesToolsets: typeof body.hermesToolsets === "string" ? body.hermesToolsets : undefined,
+        hermesSkills: typeof body.hermesSkills === "string" ? body.hermesSkills : undefined,
       });
       if (!updated) return notFound(res);
       context.emit("org:updated", { employee: params.name });
@@ -1259,38 +1291,24 @@ Handle this as a priority request from a colleague.`;
       return json(res, { status: "removed", name: params.name });
     }
 
+    // GET /api/hermes/profiles — list available Hermes profiles for UI/employee creation
+    if (method === "GET" && pathname === "/api/hermes/profiles") {
+      const profilesDir = path.join(process.env.HOME || "~", ".hermes", "profiles");
+      try {
+        const profiles = fs.readdirSync(profilesDir, { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name);
+        return json(res, { profiles });
+      } catch {
+        return json(res, { profiles: [] });
+      }
+    }
+
     // GET /api/config
     if (method === "GET" && pathname === "/api/config") {
       const config = context.getConfig();
-      // Sanitize: remove any secrets/tokens from connectors
-      const rawConnectors = config.connectors || {};
-      const sanitizedConnectors: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(rawConnectors)) {
-        if (k === "instances" && Array.isArray(v)) {
-          sanitizedConnectors.instances = v.map((inst: any) => ({
-            ...inst,
-            token: inst?.token ? "***" : undefined,
-            signingSecret: inst?.signingSecret ? "***" : undefined,
-            botToken: inst?.botToken ? "***" : undefined,
-            appToken: inst?.appToken ? "***" : undefined,
-          }));
-        } else if (v && typeof v === "object") {
-          sanitizedConnectors[k] = {
-            ...v,
-            token: (v as any)?.token ? "***" : undefined,
-            signingSecret: (v as any)?.signingSecret ? "***" : undefined,
-            botToken: (v as any)?.botToken ? "***" : undefined,
-            appToken: (v as any)?.appToken ? "***" : undefined,
-          };
-        } else {
-          sanitizedConnectors[k] = v;
-        }
-      }
-      const sanitized = {
-        ...config,
-        connectors: sanitizedConnectors,
-      };
-      return json(res, sanitized);
+      // Recursively sanitize all secret keys from entire config (connectors, engines, etc.)
+      return json(res, sanitizeSecrets(config));
     }
 
     // PUT /api/config
@@ -2170,6 +2188,27 @@ async function runWebSession(
     if (!getSession(currentSession.id)) {
       logger.info(`Skipping completion for deleted web session ${currentSession.id}`);
       return;
+    }
+
+    // Persist Hermes runtime metadata + routing decision into transportMeta for API/frontend.
+    // hermesMeta: engine-level metadata from HermesEngine output (only when Hermes ran).
+    // routingMeta: Jinn-side routing decision — always written for web sessions too.
+    {
+      const currentMeta = { ...(getSession(currentSession.id)?.transportMeta || currentSession.transportMeta || {}) } as Record<string, unknown>;
+      if (result.hermesMeta) {
+        currentMeta["hermesMeta"] = result.hermesMeta;
+      }
+      currentMeta["routingMeta"] = {
+        requestedBrain: currentSession.engine,
+        actualExecutor: currentSession.engine,
+        fallbackUsed: false,
+      };
+      updateSession(currentSession.id, { transportMeta: currentMeta as any });
+    }
+
+    // Accumulate cost and turns — mirrors manager.ts behaviour for messaging sessions
+    if (result.cost || result.numTurns) {
+      accumulateSessionCost(currentSession.id, result.cost ?? 0, result.numTurns ?? 1);
     }
 
     const wasInterrupted = result.error?.startsWith("Interrupted");
