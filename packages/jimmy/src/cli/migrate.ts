@@ -168,9 +168,15 @@ export async function runMigrate(opts: { check?: boolean; auto?: boolean }): Pro
   console.log(`\nLaunching AI to apply ${pending.length} migration(s)...\n`);
 
   const config = loadConfig();
-  const defaultEngine = config.engines.default ?? "claude";
+  // hermes is the primary brain; fall through hermes then claude as last resort
+  const defaultEngine = config.engines.default ?? "hermes";
   const engines = config.engines as unknown as Record<string, import("../shared/types.js").EngineConfig | undefined>;
-  const engineConfig = engines[defaultEngine] ?? config.engines.claude;
+  const engineConfig = engines[defaultEngine] ?? config.engines.hermes ?? config.engines.claude;
+
+  if (!engineConfig) {
+    console.error(`${RED}No engine config found for "${defaultEngine}". Check your config.yaml.${RESET}`);
+    process.exit(1);
+  }
 
   try {
     const prompt = [
