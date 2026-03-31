@@ -97,7 +97,13 @@ function findEmployeeYamlPath(name: string): string | undefined {
  */
 export function updateEmployeeYaml(
   name: string,
-  updates: { alwaysNotify?: boolean },
+  updates: {
+    alwaysNotify?: boolean;
+    hermesProfile?: string;
+    hermesProvider?: string;
+    hermesToolsets?: string;
+    hermesSkills?: string;
+  },
 ): boolean {
   const filePath = findEmployeeYamlPath(name);
   if (!filePath) return false;
@@ -109,6 +115,18 @@ export function updateEmployeeYaml(
 
     if (typeof updates.alwaysNotify === "boolean") {
       data.alwaysNotify = updates.alwaysNotify;
+    }
+    if (updates.hermesProfile !== undefined) {
+      data.hermesProfile = updates.hermesProfile || undefined;
+    }
+    if (updates.hermesProvider !== undefined) {
+      data.hermesProvider = updates.hermesProvider || undefined;
+    }
+    if (updates.hermesToolsets !== undefined) {
+      data.hermesToolsets = updates.hermesToolsets || undefined;
+    }
+    if (updates.hermesSkills !== undefined) {
+      data.hermesSkills = updates.hermesSkills || undefined;
     }
 
     fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
