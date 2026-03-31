@@ -26,6 +26,7 @@ import {
   DollarSign,
   Activity,
 } from "lucide-react";
+import { HermesActivityWidget } from "@/components/hermes/hermes-activity";
 
 type StatusData = StatusResponse
 
@@ -293,6 +294,11 @@ export default function DashboardPage() {
               );
             })}
           </div>
+        </div>
+
+        {/* Hermes Activity */}
+        <div className="mb-[var(--space-6)]">
+          <HermesActivityWidget />
         </div>
 
         {/* Recent activity feed */}
