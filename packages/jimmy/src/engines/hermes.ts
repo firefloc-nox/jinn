@@ -37,6 +37,13 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import type { InterruptibleEngine, EngineRunOpts, EngineResult, HermesRuntimeMeta } from "../shared/types.js";
 import { logger } from "../shared/logger.js";
+import { HermesWebAPITransport, runViaWebAPI } from "./hermes-webapi.js";
+
+/** Configuration du transport WebAPI — overridable via env vars. */
+const WEBAPI_CONFIG = {
+  host: process.env.HERMES_WEBAPI_HOST ?? "127.0.0.1",
+  port: Number(process.env.HERMES_WEBAPI_PORT ?? "8642"),
+};
 
 /**
  * Resolve the model to pass to hermes CLI.
@@ -120,6 +127,38 @@ export class HermesEngine implements InterruptibleEngine {
   }
 
   async run(opts: EngineRunOpts): Promise<EngineResult> {
+    const startMs = Date.now();
+
+    // 1. Essayer le transport WebAPI (Hermes port 8642) en priorité.
+    //    isAvailable() est mis en cache 30s — pas de health check à chaque run.
+    const webapi = new HermesWebAPITransport(WEBAPI_CONFIG);
+    if (await webapi.isAvailable()) {
+      logger.info(
+        `[HermesEngine] WebAPI available at ${WEBAPI_CONFIG.host}:${WEBAPI_CONFIG.port} — using HTTP transport`,
+      );
+      try {
+        return await runViaWebAPI(webapi, opts, startMs);
+      } catch (err) {
+        // Si le transport WebAPI échoue en cours d'exécution, invalider le cache
+        // et passer au fallback CLI pour ne pas perdre la requête.
+        HermesWebAPITransport.invalidateAvailabilityCache();
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          `[HermesEngine] WebAPI transport failed: ${errMsg} — falling back to CLI spawn`,
+        );
+      }
+    } else {
+      logger.info(
+        `[HermesEngine] WebAPI unavailable at ${WEBAPI_CONFIG.host}:${WEBAPI_CONFIG.port} — falling back to CLI spawn`,
+      );
+    }
+
+    // 2. Fallback CLI spawn (comportement V1 d'origine).
+    return this.runViaCLI(opts, startMs);
+  }
+
+  /** Exécute le chat via CLI spawn (fallback V1). */
+  private async runViaCLI(opts: EngineRunOpts, startMs = Date.now()): Promise<EngineResult> {
     const bin = opts.bin ? resolveBin(opts.bin) : resolveBin("hermes");
 
     // Build the prompt — inject systemPrompt as prefix (V1 workaround)
@@ -150,7 +189,7 @@ export class HermesEngine implements InterruptibleEngine {
     if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 
     logger.info(
-      `Hermes engine starting: ${bin} chat -q [prompt] --quiet --source tool --yolo` +
+      `[HermesEngine/CLI] Starting: ${bin} chat -q [prompt] --quiet --source tool --yolo` +
       ` --model ${resolvedModel || "default"}` +
       ` (resume: ${opts.resumeSessionId || "none"})` +
       (opts.hermesProvider ? ` --provider ${opts.hermesProvider}` : "") +
@@ -158,8 +197,6 @@ export class HermesEngine implements InterruptibleEngine {
       (opts.hermesToolsets ? ` --toolsets ${opts.hermesToolsets}` : "") +
       (opts.hermesSkills ? ` --skills ${opts.hermesSkills}` : ""),
     );
-
-    const startMs = Date.now();
 
     return new Promise((resolve, reject) => {
       const proc = spawn(bin, args, {
