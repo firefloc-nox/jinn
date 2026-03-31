@@ -35,7 +35,7 @@ export function RuntimeBadges({
       {activeBrain ? (
         <Badge
           variant="outline"
-          className={cn('border px-2.5 py-1 text-[11px] font-semibold', brainStyles[activeBrain.toLowerCase()] ?? 'border-[var(--separator)] text-[var(--text-secondary)]')}
+          className={cn('border px-2.5 py-1 text-[length:var(--text-caption2)] font-[var(--weight-semibold)]', brainStyles[activeBrain.toLowerCase()] ?? 'border-[var(--separator)] text-[var(--text-secondary)]')}
         >
           {formatBrainLabel(activeBrain)}
         </Badge>
