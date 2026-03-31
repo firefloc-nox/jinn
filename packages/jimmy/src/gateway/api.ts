@@ -1164,19 +1164,15 @@ export async function handleApiRequest(
       const targetId = params.id;
 
       if (targetId.startsWith("hermes-")) {
-        // Job Hermes — deux mécanismes : next_run_at dans le passé + runCronJob direct
+        // Job Hermes — trigger direct via le runner Jinn.
+        // Choix : on n'écrit PAS next_run_at dans le fichier JSON pour éviter la race condition
+        // avec le scheduler Python (qui pourrait lire next_run_at avant que le runner Jinn ait
+        // fini et déclencher une seconde exécution). Un seul mécanisme = un seul chemin d'exécution.
         const hermesNativeId = targetId.slice(7);
         const hermesJobs = loadHermesJobs();
         const hermesJob = hermesJobs.find((j) => j.id === hermesNativeId);
         if (!hermesJob) return notFound(res);
 
-        // Forcer next_run_at = maintenant - 1s pour déclencher au prochain tick Hermes
-        const pastTs = new Date(Date.now() - 1000).toISOString();
-        const hidx = hermesJobs.findIndex((j) => j.id === hermesNativeId);
-        hermesJobs[hidx] = { ...hermesJob, next_run_at: pastTs };
-        saveHermesJobs(hermesJobs);
-
-        // Tenter aussi un trigger direct via le runner Jinn (pour delivery immédiat)
         const jinnJob = hermesJobToJinn(hermesJob);
         if (jinnJob) {
           runCronJob(jinnJob, context.sessionManager, context.getConfig(), context.connectors).catch(
@@ -1189,7 +1185,7 @@ export async function handleApiRequest(
           triggered: true,
           jobId: `hermes-${hermesNativeId}`,
           name: hermesJob.name,
-          message: `Hermes cron job "${hermesJob.name}" triggered (next_run_at forced)`,
+          message: `Hermes cron job "${hermesJob.name}" triggered manually`,
         });
       } else {
         // Job Jinn — comportement original
