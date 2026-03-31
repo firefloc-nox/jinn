@@ -9,6 +9,7 @@ import { GlobalSearch } from "./global-search"
 import { LiveStreamWidget } from "./live-stream-widget"
 import { OnboardingWizard } from "./onboarding-wizard"
 import { NotificationBell } from "./notifications/notification-bell"
+import { HermesStatusBadge } from "@/components/hermes/hermes-status"
 import { ToastContainer } from "./notifications/toast-container"
 import { BreadcrumbBar } from "./breadcrumb-bar"
 import { useBreadcrumbs } from "@/context/breadcrumb-context"
@@ -39,6 +40,7 @@ function MobileHeader({ actions }: { actions?: React.ReactNode }) {
         </div>
         <div className="flex items-center gap-1">
           {actions}
+          <HermesStatusBadge className="mr-1" />
           <NotificationBell />
         </div>
       </div>

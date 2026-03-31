@@ -15,6 +15,7 @@ import { THEMES } from "@/lib/themes"
 import { NAV_ITEMS } from "@/lib/nav"
 import type { ThemeId } from "@/lib/themes"
 import { cn } from "@/lib/utils"
+import { HermesStatusBadge } from "@/components/hermes/hermes-status"
 
 // ---------------------------------------------------------------------------
 // Theme icon helper
@@ -149,7 +150,19 @@ export function Sidebar() {
         </div>
       )}
 
-      <div className="shrink-0 px-2 pb-3 pt-2">
+      {/* Hermes status — only visible when expanded */}
+      <div className="shrink-0 px-2 pt-1">
+        <div
+          className={cn(
+            "flex h-8 items-center px-3 transition-opacity duration-200",
+            hovered ? "opacity-100" : "opacity-0"
+          )}
+        >
+          <HermesStatusBadge />
+        </div>
+      </div>
+
+      <div className="shrink-0 px-2 pb-3 pt-1">
         <button
           onClick={cycleTheme}
           aria-label={`Theme: ${theme}. Click to cycle.`}
