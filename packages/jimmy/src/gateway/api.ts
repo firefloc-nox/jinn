@@ -1297,6 +1297,86 @@ export async function handleApiRequest(
       return json(res, { status: "ok" });
     }
 
+    // POST /api/org/employees — create a new employee
+    if (method === "POST" && pathname === "/api/org/employees") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+
+      // Validate required fields
+      const name: unknown = body.name;
+      if (typeof name !== "string" || !name.trim()) {
+        return badRequest(res, "name is required");
+      }
+      const safeName = name.trim();
+      if (!/^[a-zA-Z0-9-]+$/.test(safeName)) {
+        return badRequest(res, "name must be alphanumeric with hyphens only");
+      }
+      if (!body.persona || typeof body.persona !== "string") {
+        return badRequest(res, "persona is required");
+      }
+
+      // Check for duplicate
+      const { scanOrg, createEmployeeYaml } = await import("./org.js");
+      const orgRegistry = scanOrg();
+      if (orgRegistry.has(safeName)) {
+        return json(res, { error: `Employee "${safeName}" already exists` }, 409);
+      }
+
+      // Optional: clone a Hermes profile
+      if (body.createHermesProfile === true) {
+        const profileName = typeof body.hermesProfile === "string" && body.hermesProfile
+          ? body.hermesProfile
+          : safeName;
+        const hermesProfilesDir = path.join(os.homedir(), ".hermes", "profiles");
+        const cloneFrom = typeof body.cloneProfileFrom === "string" && body.cloneProfileFrom
+          ? body.cloneProfileFrom
+          : "default";
+        const sourceDir = path.join(hermesProfilesDir, cloneFrom);
+        const targetDir = path.join(hermesProfilesDir, profileName);
+        if (!fs.existsSync(targetDir)) {
+          if (fs.existsSync(sourceDir)) {
+            fs.cpSync(sourceDir, targetDir, { recursive: true });
+            logger.info(`Cloned Hermes profile: ${cloneFrom} → ${profileName}`);
+          } else {
+            fs.mkdirSync(targetDir, { recursive: true });
+            logger.info(`Created empty Hermes profile directory: ${profileName}`);
+          }
+        }
+        // Use the resolved profile name
+        if (!body.hermesProfile) body.hermesProfile = profileName;
+      }
+
+      try {
+        createEmployeeYaml({
+          name: safeName,
+          displayName: typeof body.displayName === "string" ? body.displayName : safeName,
+          department: typeof body.department === "string" ? body.department : undefined,
+          rank: (["executive","manager","senior","employee"] as const).includes(body.rank) ? body.rank : "employee",
+          reportsTo: typeof body.reportsTo === "string" ? body.reportsTo : undefined,
+          persona: body.persona,
+          engine: typeof body.engine === "string" ? body.engine : "hermes",
+          model: typeof body.model === "string" ? body.model : undefined,
+          fallbackEngine: typeof body.fallbackEngine === "string" ? body.fallbackEngine : undefined,
+          emoji: typeof body.emoji === "string" ? body.emoji : undefined,
+          alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
+          mcp: body.mcp !== undefined ? body.mcp : undefined,
+          hermesProfile: typeof body.hermesProfile === "string" ? body.hermesProfile : undefined,
+          hermesProvider: typeof body.hermesProvider === "string" ? body.hermesProvider : undefined,
+          hermesToolsets: typeof body.hermesToolsets === "string" ? body.hermesToolsets : undefined,
+          hermesSkills: typeof body.hermesSkills === "string" ? body.hermesSkills : undefined,
+        });
+      } catch (err) {
+        return serverError(res, `Failed to create employee: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Return the created employee
+      const updatedRegistry = scanOrg();
+      const created = updatedRegistry.get(safeName);
+      context.emit("org:updated", { employee: safeName });
+      return json(res, created ?? { name: safeName }, 201);
+    }
+
     // GET /api/org/services — list all cross-department services
     if (method === "GET" && pathname === "/api/org/services") {
       const { scanOrg } = await import("./org.js");

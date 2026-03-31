@@ -225,6 +225,76 @@ export function updateEmployeeYaml(
   }
 }
 
+/**
+ * Input shape for creating a new employee YAML file.
+ */
+export interface CreateEmployeeInput {
+  name: string;
+  displayName?: string;
+  department?: string;
+  rank?: "executive" | "manager" | "senior" | "employee";
+  reportsTo?: string;
+  persona: string;
+  engine?: string;
+  model?: string;
+  fallbackEngine?: string;
+  emoji?: string;
+  alwaysNotify?: boolean;
+  mcp?: boolean | string[];
+  hermesProfile?: string;
+  hermesProvider?: string;
+  hermesToolsets?: string;
+  hermesSkills?: string;
+}
+
+/**
+ * Create a new employee YAML file under ORG_DIR/<department>/<name>.yaml.
+ * Returns the resolved file path on success, throws on error.
+ */
+export function createEmployeeYaml(input: CreateEmployeeInput): string {
+  const department = input.department || "default";
+  const deptDir = path.join(ORG_DIR, department);
+  fs.mkdirSync(deptDir, { recursive: true });
+
+  const filePath = path.join(deptDir, `${input.name}.yaml`);
+
+  const data: Record<string, unknown> = {
+    name: input.name,
+    displayName: input.displayName || input.name,
+    department,
+    rank: input.rank || "employee",
+    persona: input.persona,
+    engine: input.engine || "hermes",
+  };
+
+  if (input.reportsTo) data.reportsTo = input.reportsTo;
+  if (input.model) data.model = input.model;
+  if (input.fallbackEngine) data.fallbackEngine = input.fallbackEngine;
+  if (input.emoji) data.emoji = input.emoji;
+  if (typeof input.alwaysNotify === "boolean") data.alwaysNotify = input.alwaysNotify;
+  if (input.mcp !== undefined) data.mcp = input.mcp;
+  if (input.hermesProfile) data.hermesProfile = input.hermesProfile;
+  if (input.hermesProvider) data.hermesProvider = input.hermesProvider;
+  if (input.hermesToolsets) data.hermesToolsets = input.hermesToolsets;
+  if (input.hermesSkills) data.hermesSkills = input.hermesSkills;
+
+  fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
+  logger.info(`Created employee YAML: ${filePath}`);
+  return filePath;
+}
+
+/**
+ * Delete an employee YAML file by name. Searches ORG_DIR recursively.
+ * Returns the path that was deleted, or undefined if not found.
+ */
+export function deleteEmployeeYaml(name: string): string | undefined {
+  const filePath = findEmployeeYamlPath(name);
+  if (!filePath) return undefined;
+  fs.unlinkSync(filePath);
+  logger.info(`Deleted employee YAML: ${filePath}`);
+  return filePath;
+}
+
 export function findEmployee(
   name: string,
   registry: Map<string, Employee>,
