@@ -6,7 +6,7 @@ interface EngineConfigShape {
   [key: string]: unknown
 }
 
-interface BrainSettingsConfig {
+export interface BrainSettingsConfig {
   brain?: {
     primary?: string
     fallbacks?: string[]
@@ -16,6 +16,7 @@ interface BrainSettingsConfig {
     fallbackEngines?: string[]
     [key: string]: unknown
   }
+  mcp?: Record<string, unknown>
   engines?: {
     default?: string
     claude?: EngineConfigShape
@@ -24,6 +25,7 @@ interface BrainSettingsConfig {
     hermes?: EngineConfigShape
     [key: string]: unknown
   }
+  [key: string]: unknown
 }
 
 const PREFERRED_BRAIN_ORDER = ['hermes', 'claude', 'codex', 'gemini']
@@ -31,6 +33,10 @@ const PREFERRED_BRAIN_ORDER = ['hermes', 'claude', 'codex', 'gemini']
 export function getAvailableBrains(status?: StatusResponse | null, config?: BrainSettingsConfig | null): string[] {
   const values = [
     status?.defaultBrain,
+    status?.brain?.primary,
+    status?.fallbackPolicy?.primary,
+    ...(status?.brain?.fallbacks ?? []),
+    ...(status?.fallbackPolicy?.fallbacks ?? []),
     ...(status?.registeredEngines ?? []),
     ...Object.keys(status?.engines?.registered ?? {}),
     ...Object.entries(config?.engines ?? {})
@@ -79,6 +85,29 @@ export function moveFallbackBrain(fallbacks: string[], brain: string, direction:
   if (targetIndex < 0 || targetIndex >= next.length) return next
 
   ;[next[index], next[targetIndex]] = [next[targetIndex], next[index]]
+  return next
+}
+
+export function sanitizeConfigForSave(config: BrainSettingsConfig): BrainSettingsConfig {
+  const next: BrainSettingsConfig = structuredClone(config)
+  const primary = next.brain?.primary
+  const fallbacks = next.brain?.fallbacks
+
+  if (primary) {
+    next.engines = {
+      ...(next.engines ?? {}),
+      default: primary,
+    }
+  }
+
+  if (fallbacks) {
+    next.sessions = {
+      ...(next.sessions ?? {}),
+      fallbackEngines: [...fallbacks],
+    }
+  }
+
+  delete next.brain
   return next
 }
 

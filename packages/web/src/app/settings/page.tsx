@@ -10,7 +10,7 @@ import { THEMES } from "@/lib/themes"
 import type { ThemeId } from "@/lib/themes"
 import { api, type StatusResponse } from "@/lib/api"
 import { EmojiPicker } from "@/components/ui/emoji-picker"
-import { getAvailableBrains, getBrainConfigSnapshot, moveFallbackBrain } from "@/lib/brain-settings"
+import { getAvailableBrains, getBrainConfigSnapshot, moveFallbackBrain, sanitizeConfigForSave } from "@/lib/brain-settings"
 
 // ---------------------------------------------------------------------------
 // Accent color presets
@@ -612,7 +612,7 @@ export default function SettingsPage() {
     setSaving(true)
     setFeedback(null)
     api
-      .updateConfig(config)
+      .updateConfig(sanitizeConfigForSave(config) as Record<string, unknown>)
       .then(() =>
         setFeedback({ type: "success", message: "Settings saved successfully" })
       )
@@ -970,12 +970,12 @@ export default function SettingsPage() {
                 </FieldRow>
                 <FieldRow label="Default Engine">
                   <SettingsSelect
-                    value={config.engines?.default ?? "claude"}
-                    onChange={(v) => updateConfig(["engines", "default"], v)}
-                    options={[
-                      { value: "claude", label: "Claude" },
-                      { value: "codex", label: "Codex" },
-                    ]}
+                    value={config.engines?.default ?? brainSnapshot.primary}
+                    onChange={(v) => {
+                      updateConfig(["engines", "default"], v)
+                      updateConfig(['brain', 'primary'], v)
+                    }}
+                    options={availableBrains.map((brain) => ({ value: brain, label: brain.charAt(0).toUpperCase() + brain.slice(1) }))}
                   />
                 </FieldRow>
               </Section>

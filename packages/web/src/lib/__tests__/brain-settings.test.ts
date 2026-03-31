@@ -4,6 +4,7 @@ import {
   getAvailableBrains,
   getBrainConfigSnapshot,
   moveFallbackBrain,
+  sanitizeConfigForSave,
 } from '../brain-settings'
 
 describe('brain-settings helpers', () => {
@@ -11,6 +12,7 @@ describe('brain-settings helpers', () => {
     const available = getAvailableBrains(
       {
         defaultBrain: 'hermes',
+        fallbackPolicy: { primary: 'hermes', fallbacks: ['claude', 'gemini'] },
         registeredEngines: ['hermes', 'claude', 'codex'],
         engines: {
           registered: {
@@ -62,5 +64,25 @@ describe('brain-settings helpers', () => {
     expect(moveFallbackBrain(original, 'codex', 'up')).toEqual(['codex', 'claude', 'gemini'])
     expect(moveFallbackBrain(original, 'codex', 'down')).toEqual(['claude', 'gemini', 'codex'])
     expect(original).toEqual(['claude', 'codex', 'gemini'])
+  })
+
+  it('sanitizes config for save while preserving Hermes brain selections on supported keys', () => {
+    const sanitized = sanitizeConfigForSave({
+      brain: { primary: 'hermes', fallbacks: ['claude', 'codex'] },
+      engines: {
+        default: 'claude',
+        claude: { bin: 'claude', model: 'opus' },
+        codex: { bin: 'codex', model: 'gpt-5.4' },
+        hermes: { bin: 'hermes', model: 'gpt-5.4', perEmployeeProfileSelection: true, mcpEnabled: true },
+      },
+      sessions: {},
+      mcp: {},
+    })
+
+    expect('brain' in sanitized).toBe(false)
+    expect(sanitized.engines?.default).toBe('hermes')
+    expect(sanitized.sessions?.fallbackEngines).toEqual(['claude', 'codex'])
+    expect(sanitized.engines?.hermes?.perEmployeeProfileSelection).toBe(true)
+    expect(sanitized.engines?.hermes?.mcpEnabled).toBe(true)
   })
 })

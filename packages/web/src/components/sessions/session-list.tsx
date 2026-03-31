@@ -133,6 +133,7 @@ export function SessionList({
                   </div>
                   {(() => {
                     const { hermesRuntimeMeta, routingMeta } = getSessionRuntimeMeta(s)
+                    if (!hermesRuntimeMeta && !routingMeta) return null
                     return (
                       <RuntimeBadges
                         className="mt-2"

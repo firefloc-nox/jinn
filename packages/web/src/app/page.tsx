@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, type StatusResponse } from "@/lib/api";
 import { useGateway } from "@/hooks/use-gateway";
 import { useSettings } from "@/app/settings-provider";
 import { PageLayout } from "@/components/page-layout";
@@ -27,14 +27,7 @@ import {
   Activity,
 } from "lucide-react";
 
-interface StatusData {
-  status?: string;
-  uptime?: number;
-  port?: number;
-  engines?: Record<string, unknown>;
-  sessions?: { active?: number };
-  [key: string]: unknown;
-}
+type StatusData = StatusResponse
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400);
@@ -131,9 +124,12 @@ export default function DashboardPage() {
       .catch(() => {});
   }, []);
 
-  const defaultEngine = status?.engines
-    ? Object.keys(status.engines as Record<string, unknown>)[0] ?? "--"
-    : "--";
+  const defaultEngine =
+    status?.defaultBrain ??
+    status?.engines?.defaultBrain ??
+    status?.brain?.primary ??
+    status?.engines?.default ??
+    '--'
 
   // Merge live WebSocket events with initial activity from API
   const allEvents = events.length > 0 ? events : initialActivity;
@@ -232,6 +228,11 @@ export default function DashboardPage() {
                 <p className="text-[length:var(--text-title3)] font-[var(--weight-semibold)] text-[var(--text-primary)] capitalize">
                   {defaultEngine}
                 </p>
+                {status?.brain?.fallbacks?.length ? (
+                  <p className="mt-1 text-[length:var(--text-caption2)] text-[var(--text-tertiary)]">
+                    Fallbacks: {status.brain.fallbacks.join(' → ')}
+                  </p>
+                ) : null}
               </div>
             </CardContent>
           </Card>
