@@ -457,11 +457,15 @@ export interface JinnConfig {
   engines: {
     /** Default engine name. Open string — not restricted to known engines. */
     default: EngineType;
-    claude: EngineConfig;
-    codex: EngineConfig;
-    gemini?: EngineConfig;
-    /** Hermes brain engine configuration. */
+    /**
+     * hermes is the primary brain; claude/codex/gemini are fallback engines.
+     * All engine configs are optional — the fallback policy in sessions/fallback.ts
+     * handles missing engines at runtime.
+     */
     hermes?: EngineConfig;
+    claude?: EngineConfig;
+    codex?: EngineConfig;
+    gemini?: EngineConfig;
   };
   connectors: Record<string, any> & {
     web?: WebConnectorConfig;
