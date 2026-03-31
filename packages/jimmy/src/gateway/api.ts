@@ -377,7 +377,11 @@ export async function handleApiRequest(
         brain: {
           primary: defaultBrain,
           fallbacks: config.brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
-          fallbackPolicy: config.brain ?? null,
+        },
+        // fallbackPolicy aliases brain for backwards compatibility with clients that consumed the old shape
+        fallbackPolicy: {
+          primary: defaultBrain,
+          fallbacks: config.brain?.fallbacks ?? ["claude", "codex", "gemini"].filter((e) => e !== defaultBrain),
         },
         sessions: { total: sessions.length, running, active: running },
         connectors,
