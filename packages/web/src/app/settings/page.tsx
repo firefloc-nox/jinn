@@ -8,8 +8,9 @@ import { useBreadcrumbs } from "@/context/breadcrumb-context"
 import { useTheme } from "@/app/providers"
 import { THEMES } from "@/lib/themes"
 import type { ThemeId } from "@/lib/themes"
-import { api } from "@/lib/api"
+import { api, type StatusResponse } from "@/lib/api"
 import { EmojiPicker } from "@/components/ui/emoji-picker"
+import { getAvailableBrains, getBrainConfigSnapshot, moveFallbackBrain } from "@/lib/brain-settings"
 
 // ---------------------------------------------------------------------------
 // Accent color presets
@@ -36,10 +37,22 @@ const ACCENT_PRESETS = [
 
 interface Config {
   gateway?: { port?: number; host?: string }
+  brain?: {
+    primary?: string
+    fallbacks?: string[]
+  }
   engines?: {
     default?: string
     claude?: { bin?: string; model?: string; effortLevel?: string }
     codex?: { bin?: string; model?: string; effortLevel?: string }
+    gemini?: { bin?: string; model?: string; effortLevel?: string }
+    hermes?: {
+      bin?: string
+      model?: string
+      effortLevel?: string
+      perEmployeeProfileSelection?: boolean
+      mcpEnabled?: boolean
+    }
   }
   sessions?: {
     maxDurationMinutes?: number
@@ -47,6 +60,7 @@ interface Config {
     interruptOnNewMessage?: boolean
     rateLimitStrategy?: "wait" | "fallback"
     fallbackEngine?: "codex"
+    fallbackEngines?: string[]
   }
   connectors?: {
     slack?: {
@@ -85,6 +99,13 @@ interface Config {
     level?: string
     stdout?: boolean
     file?: boolean
+  }
+  mcp?: {
+    browser?: { enabled?: boolean; provider?: 'playwright' | 'puppeteer' }
+    search?: { enabled?: boolean; provider?: 'brave'; apiKey?: string }
+    fetch?: { enabled?: boolean }
+    gateway?: { enabled?: boolean }
+    custom?: Record<string, { enabled?: boolean; [key: string]: unknown }>
   }
   cron?: {
     defaultDelivery?: { connector?: string; channel?: string }
@@ -447,6 +468,7 @@ export default function SettingsPage() {
 
   // Gateway config state
   const [config, setConfig] = useState<Config>({})
+  const [statusData, setStatusData] = useState<StatusResponse | null>(null)
   const [configLoading, setConfigLoading] = useState(true)
   const [configError, setConfigError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -490,10 +512,10 @@ export default function SettingsPage() {
   // Load gateway config
   function loadConfig() {
     setConfigLoading(true)
-    api
-      .getConfig()
-      .then((data) => {
-        setConfig(data as Config)
+    Promise.all([api.getConfig(), api.getStatus().catch(() => null)])
+      .then(([configData, status]) => {
+        setConfig(configData as Config)
+        setStatusData(status)
         setConfigError(null)
       })
       .catch((err) => setConfigError(err.message))
@@ -550,6 +572,40 @@ export default function SettingsPage() {
       obj[path[path.length - 1]] = value
       return next
     })
+  }
+
+  const availableBrains = getAvailableBrains(statusData, config)
+  const brainSnapshot = getBrainConfigSnapshot(config, statusData, availableBrains)
+  const hasEmployeeProfiles = employees.length > 0
+  const hermesMcpEnabled =
+    config.engines?.hermes?.mcpEnabled ??
+    config.mcp?.gateway?.enabled ??
+    config.mcp?.browser?.enabled ??
+    config.mcp?.search?.enabled ??
+    config.mcp?.fetch?.enabled ??
+    false
+
+  function handlePrimaryBrainChange(nextPrimary: string) {
+    const nextFallbacks = brainSnapshot.fallbacks.filter((brain) => brain !== nextPrimary)
+    updateConfig(['brain', 'primary'], nextPrimary)
+    updateConfig(['brain', 'fallbacks'], nextFallbacks)
+    updateConfig(['engines', 'default'], nextPrimary)
+    updateConfig(['sessions', 'fallbackEngines'], nextFallbacks)
+  }
+
+  function handleFallbackEnabledChange(brain: string, enabled: boolean) {
+    const nextFallbacks = enabled
+      ? [...brainSnapshot.fallbacks.filter((entry) => entry !== brain), brain]
+      : brainSnapshot.fallbacks.filter((entry) => entry !== brain)
+
+    updateConfig(['brain', 'fallbacks'], nextFallbacks)
+    updateConfig(['sessions', 'fallbackEngines'], nextFallbacks)
+  }
+
+  function handleFallbackMove(brain: string, direction: 'up' | 'down') {
+    const nextFallbacks = moveFallbackBrain(brainSnapshot.fallbacks, brain, direction)
+    updateConfig(['brain', 'fallbacks'], nextFallbacks)
+    updateConfig(['sessions', 'fallbackEngines'], nextFallbacks)
   }
 
   function handleSave() {
@@ -922,6 +978,107 @@ export default function SettingsPage() {
                     ]}
                   />
                 </FieldRow>
+              </Section>
+
+              <Section title="Hermes Brain">
+                <div className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
+                  Choose the primary brain Jinn should route to first, then tune the ordered fallback chain Hermes-first sessions should use when the primary is unavailable.
+                </div>
+
+                <FieldRow label="Default Brain">
+                  <SettingsSelect
+                    value={brainSnapshot.primary}
+                    onChange={handlePrimaryBrainChange}
+                    options={availableBrains.map((brain) => ({ value: brain, label: brain.charAt(0).toUpperCase() + brain.slice(1) }))}
+                  />
+                </FieldRow>
+
+                <div className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]">
+                  <div className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
+                    Fallback Order
+                  </div>
+                  <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
+                    Enable the brains you want in the fallback chain, then reorder them with the arrow controls.
+                  </div>
+                  <div className="flex flex-col gap-[var(--space-2)]">
+                    {availableBrains.filter((brain) => brain !== brainSnapshot.primary).map((brain) => {
+                      const enabled = brainSnapshot.fallbacks.includes(brain)
+                      const index = brainSnapshot.fallbacks.indexOf(brain)
+                      return (
+                        <div
+                          key={brain}
+                          className="flex items-center justify-between gap-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--separator)] bg-[var(--bg-secondary)] px-[var(--space-3)] py-[var(--space-2)]"
+                        >
+                          <div>
+                            <div className="text-[length:var(--text-footnote)] font-[var(--weight-medium)] text-[var(--text-primary)]">
+                              {brain.charAt(0).toUpperCase() + brain.slice(1)}
+                            </div>
+                            <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)]">
+                              {enabled ? `Fallback #${index + 1}` : 'Disabled'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-[var(--space-2)]">
+                            {enabled && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleFallbackMove(brain, 'up')}
+                                  disabled={index <= 0}
+                                  className="h-[28px] w-[28px] rounded-[var(--radius-sm)] border border-[var(--separator)] bg-[var(--fill-secondary)] text-[var(--text-secondary)] disabled:opacity-40"
+                                  aria-label={`Move ${brain} up`}
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleFallbackMove(brain, 'down')}
+                                  disabled={index === -1 || index >= brainSnapshot.fallbacks.length - 1}
+                                  className="h-[28px] w-[28px] rounded-[var(--radius-sm)] border border-[var(--separator)] bg-[var(--fill-secondary)] text-[var(--text-secondary)] disabled:opacity-40"
+                                  aria-label={`Move ${brain} down`}
+                                >
+                                  ↓
+                                </button>
+                              </>
+                            )}
+                            <ToggleSwitch
+                              checked={enabled}
+                              onChange={(next) => handleFallbackEnabledChange(brain, next)}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {hasEmployeeProfiles && (
+                  <>
+                    <div className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]" />
+                    <FieldRow label="Per-Employee Profiles">
+                      <ToggleSwitch
+                        checked={config.engines?.hermes?.perEmployeeProfileSelection ?? false}
+                        onChange={(value) => updateConfig(['engines', 'hermes', 'perEmployeeProfileSelection'], value)}
+                      />
+                    </FieldRow>
+                    <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mt-[-4px]">
+                      When enabled, Hermes profile selection can follow employee-specific routing instead of using one shared profile for every web chat.
+                    </div>
+                  </>
+                )}
+
+                <div className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]" />
+                <FieldRow label="MCP Enablement">
+                  <ToggleSwitch
+                    checked={hermesMcpEnabled}
+                    onChange={(value) => {
+                      updateConfig(['engines', 'hermes', 'mcpEnabled'], value)
+                      updateConfig(['mcp', 'gateway', 'enabled'], value)
+                    }}
+                  />
+                </FieldRow>
+                <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mt-[-4px]">
+                  Lets Hermes-first sessions expose MCP tools when your gateway MCP server is enabled.
+                </div>
               </Section>
 
               {/* -- Section 4: Engine Configuration -- */}
