@@ -1,15 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 
-// Must be hoisted — vi.mock calls are hoisted to top of file by Vitest.
-// HermesWebAPIClient is called with `new` inside HermesDataConnector constructor,
-// so we need a class-based mock implementation.
-const mockCheckHealth = vi.fn().mockResolvedValue(true)
+// ---------------------------------------------------------------------------
+// Mocks — factories may only contain vi.fn() and literal values (they're
+// hoisted before class/const declarations in the module scope).
+// ---------------------------------------------------------------------------
 
 vi.mock('../client.js', () => ({
-  HermesWebAPIClient: vi.fn().mockImplementation(class {
-    checkHealth = mockCheckHealth
-  }),
+  HermesWebAPIClient: vi.fn(),
   resolveHermesHome: vi.fn().mockReturnValue('/tmp/hermes-test'),
 }))
 
@@ -19,8 +17,13 @@ import { HermesWebAPIClient } from '../client.js'
 import { HermesDataConnector } from '../index.js'
 
 // ---------------------------------------------------------------------------
-// Mock watcher
+// Shared mock state (created AFTER imports so vi.mock has already been applied)
 // ---------------------------------------------------------------------------
+
+// This object is the instance that `new HermesWebAPIClient()` will return.
+// Wired in beforeEach via mockImplementation using a regular `function`.
+const mockCheckHealth = vi.fn().mockResolvedValue(true)
+const mockClientInstance = { checkHealth: mockCheckHealth }
 
 const mockWatcher = {
   on: vi.fn().mockReturnThis(),
@@ -38,12 +41,19 @@ describe('HermesDataConnector lifecycle', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
 
-    // Restore mockReturnThis on watcher after clearAllMocks resets it
-    vi.mocked(mockWatcher.on).mockReturnThis()
+    // Restore mockReturnThis on watcher.on after clearAllMocks
+    mockWatcher.on.mockReturnThis()
 
     // Default fs: file does not exist (safe default for cron watcher)
     vi.mocked(fs.existsSync).mockReturnValue(false)
     vi.mocked(fs.watch).mockReturnValue(mockWatcher as unknown as ReturnType<typeof fs.watch>)
+
+    // Wire HermesWebAPIClient constructor to return our controlled instance.
+    // MUST use a regular `function` (not arrow) so it can be called with `new`.
+    vi.mocked(HermesWebAPIClient).mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      function () { return mockClientInstance } as unknown as typeof HermesWebAPIClient,
+    )
 
     // Default: API is healthy
     mockCheckHealth.mockResolvedValue(true)
@@ -123,8 +133,7 @@ describe('HermesDataConnector lifecycle', () => {
     const client = connector.getClient()
 
     expect(client).not.toBeNull()
-    // client is an instance of the mocked class
-    expect(client).toBeInstanceOf(vi.mocked(HermesWebAPIClient))
+    expect(client).toBe(mockClientInstance)
   })
 
   // -------------------------------------------------------------------------
