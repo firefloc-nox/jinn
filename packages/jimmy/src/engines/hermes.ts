@@ -34,9 +34,22 @@
  *   Hermes manages its own MCP servers natively. mcpConfigPath is ignored.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import type { InterruptibleEngine, EngineRunOpts, EngineResult, HermesRuntimeMeta } from "../shared/types.js";
 import { logger } from "../shared/logger.js";
+
+/**
+ * Resolve the absolute path of a binary, falling back to the name itself.
+ * Uses `which` on Unix so that Node child_process can find it regardless
+ * of the inherited PATH.
+ */
+function resolveBin(name: string): string {
+  try {
+    return execFileSync("which", [name], { encoding: "utf8" }).trim();
+  } catch {
+    return name;
+  }
+}
 
 interface LiveProcess {
   proc: ChildProcess;
@@ -82,7 +95,7 @@ export class HermesEngine implements InterruptibleEngine {
   }
 
   async run(opts: EngineRunOpts): Promise<EngineResult> {
-    const bin = opts.bin || "hermes";
+    const bin = opts.bin ? resolveBin(opts.bin) : resolveBin("hermes");
 
     // Build the prompt — inject systemPrompt as prefix (V1 workaround)
     let prompt = opts.prompt;
@@ -121,8 +134,19 @@ export class HermesEngine implements InterruptibleEngine {
     return new Promise((resolve, reject) => {
       const proc = spawn(bin, args, {
         cwd: opts.cwd,
-        // Inherit env — Hermes reads ANTHROPIC_API_KEY, OPENROUTER_API_KEY, etc. from environment
-        env: process.env,
+        // Inherit env + ensure PATH contains common local bin dirs so hermes sub-processes
+        // (skills, tools) can resolve their own dependencies.
+        env: {
+          ...process.env,
+          PATH: [
+            process.env.PATH,
+            `${process.env.HOME}/.local/bin`,
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+          ]
+            .filter(Boolean)
+            .join(":"),
+        },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
       });
