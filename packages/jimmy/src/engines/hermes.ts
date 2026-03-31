@@ -2,7 +2,7 @@
  * HermesEngine — invoke Hermes as the primary brain via CLI spawn.
  *
  * Invocation contract (V1, non-streaming):
- *   hermes chat -q "<prompt>" --quiet --source tool --yolo [--model <m>] [--provider <p>] [--resume <id>]
+ *   hermes chat -q "<prompt>" --quiet --source tool --yolo [--model <m>] [--provider <p>] [--profile <p>] [--resume <id>] [--toolsets <t>] [--skills <s>] [--pass-session-id]
  *
  * stdout format:
  *   <response text, potentially multiline>
@@ -125,16 +125,20 @@ export class HermesEngine implements InterruptibleEngine {
 
     if (opts.model) args.push("--model", opts.model);
     if (opts.hermesProvider) args.push("--provider", opts.hermesProvider);
+    if (opts.hermesProfile) args.push("--profile", opts.hermesProfile);
+    if (opts.hermesToolsets) args.push("--toolsets", opts.hermesToolsets);
+    if (opts.hermesSkills) args.push("--skills", opts.hermesSkills);
+    if (opts.hermesPassSessionId) args.push("--pass-session-id");
     if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
-
-    // hermesProfile is V2 — not yet wired as a CLI flag
-    // opts.hermesProfile: reserved for future `--profile` flag
 
     logger.info(
       `Hermes engine starting: ${bin} chat -q [prompt] --quiet --source tool --yolo` +
       ` --model ${opts.model || "default"}` +
       ` (resume: ${opts.resumeSessionId || "none"})` +
-      (opts.hermesProvider ? ` --provider ${opts.hermesProvider}` : ""),
+      (opts.hermesProvider ? ` --provider ${opts.hermesProvider}` : "") +
+      (opts.hermesProfile ? ` --profile ${opts.hermesProfile}` : "") +
+      (opts.hermesToolsets ? ` --toolsets ${opts.hermesToolsets}` : "") +
+      (opts.hermesSkills ? ` --skills ${opts.hermesSkills}` : ""),
     );
 
     const startMs = Date.now();
