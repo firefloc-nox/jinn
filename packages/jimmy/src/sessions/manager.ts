@@ -371,7 +371,14 @@ export class SessionManager {
         mcpConfigPath,
         attachments: attachments.length > 0 ? attachments : undefined,
         sessionId: session.id,
-        ...(resolvedEngine === "hermes" && employee ? hermesRunInputToOpts(mapEmployeeToHermesInput(employee)) : {}),
+        // COO fallback: if no employee, use portal.hermesProfile as the COO profile
+        ...(resolvedEngine === "hermes"
+          ? employee
+            ? hermesRunInputToOpts(mapEmployeeToHermesInput(employee))
+            : this.config.portal?.hermesProfile
+              ? { hermesProfile: this.config.portal.hermesProfile }
+              : {}
+          : {}),
       });
 
       // Persist Hermes runtime metadata + routing decision into transportMeta for API/frontend.

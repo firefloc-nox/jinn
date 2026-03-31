@@ -459,6 +459,8 @@ export interface PortalConfig {
   operatorName?: string;
   language?: string;
   onboarded?: boolean;
+  /** Hermes profile to use for COO sessions (sessions with no employee). */
+  hermesProfile?: string;
 }
 
 /** Per-engine configuration block shared across all engine types. */

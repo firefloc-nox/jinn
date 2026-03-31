@@ -2165,7 +2165,14 @@ async function runWebSession(
       attachments: attachments?.length ? attachments : undefined,
       sessionId: currentSession.id,
       // Wire Hermes profile/toolsets/skills from employee config — mirrors manager.ts
-      ...(currentSession.engine === "hermes" && employee ? hermesRunInputToOpts(mapEmployeeToHermesInput(employee)) : {}),
+      // COO fallback: if no employee, use portal.hermesProfile as the COO profile
+      ...(currentSession.engine === "hermes"
+        ? employee
+          ? hermesRunInputToOpts(mapEmployeeToHermesInput(employee))
+          : config.portal?.hermesProfile
+            ? { hermesProfile: config.portal.hermesProfile }
+            : {}
+        : {}),
       onStream: (delta) => {
         const now = Date.now();
         if (now - lastHeartbeatAt >= 2000) {
