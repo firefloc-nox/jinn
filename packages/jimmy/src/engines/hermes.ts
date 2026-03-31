@@ -136,8 +136,12 @@ export class HermesEngine implements InterruptibleEngine {
         cwd: opts.cwd,
         // Inherit env + ensure PATH contains common local bin dirs so hermes sub-processes
         // (skills, tools) can resolve their own dependencies.
+        // LACP_BYPASS=1: the hermes binary is a LACP wrapper that detects TTY absence and
+        // falls back to the claude CLI in non-interactive mode. Bypass forces direct execution
+        // of hermes.native regardless of TTY state.
         env: {
           ...process.env,
+          LACP_BYPASS: "1",  // bypass LACP wrapper in non-interactive spawn mode
           PATH: [
             process.env.PATH,
             `${process.env.HOME}/.local/bin`,
