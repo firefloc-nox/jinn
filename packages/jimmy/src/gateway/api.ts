@@ -1661,15 +1661,88 @@ Handle this as a priority request from a colleague.`;
 
     // GET /api/hermes/profiles — list available Hermes profiles for UI/employee creation
     if (method === "GET" && pathname === "/api/hermes/profiles") {
-      const profilesDir = path.join(process.env.HOME || "~", ".hermes", "profiles");
+      const { listProfiles } = await import("../hermes/profile-fs.js");
+      return json(res, { profiles: listProfiles() });
+    }
+
+    // GET /api/hermes/profiles/:name — read a profile's config + markdown files
+    params = matchRoute("/api/hermes/profiles/:name", pathname);
+    if (method === "GET" && params) {
+      const { readHermesProfile } = await import("../hermes/profile-fs.js");
+      return json(res, readHermesProfile(params.name));
+    }
+
+    // PATCH /api/hermes/profiles/:name — write SOUL.md / AGENT.md or patch config.yaml fields
+    params = matchRoute("/api/hermes/profiles/:name", pathname);
+    if (method === "PATCH" && params) {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+      const { writeProfileFile, patchProfileConfig, readHermesProfile } = await import("../hermes/profile-fs.js");
+
       try {
-        const profiles = fs.readdirSync(profilesDir, { withFileTypes: true })
-          .filter((e) => e.isDirectory())
-          .map((e) => e.name);
-        return json(res, { profiles });
-      } catch {
-        return json(res, { profiles: [] });
+        if (typeof body.soul === "string") {
+          writeProfileFile(params.name, "SOUL.md", body.soul);
+        }
+        if (typeof body.agent === "string") {
+          writeProfileFile(params.name, "AGENT.md", body.agent);
+        }
+        if (typeof body.role_soul === "string") {
+          writeProfileFile(params.name, "ROLE_SOUL.md", body.role_soul);
+        }
+        if (body.config && typeof body.config === "object" && !Array.isArray(body.config)) {
+          patchProfileConfig(params.name, body.config);
+        }
+      } catch (err) {
+        return serverError(res, err instanceof Error ? err.message : String(err));
       }
+
+      return json(res, readHermesProfile(params.name));
+    }
+
+    // POST /api/hermes/profiles — create a new Hermes profile (clone from default or existing)
+    if (method === "POST" && pathname === "/api/hermes/profiles") {
+      const _parsed = await readJsonBody(req, res);
+      if (!_parsed.ok) return;
+      const body = _parsed.body as any;
+
+      if (typeof body.name !== "string" || !body.name.trim()) {
+        return badRequest(res, "name is required");
+      }
+      const profileName = body.name.trim();
+      if (!/^[a-zA-Z0-9-_]+$/.test(profileName)) {
+        return badRequest(res, "name must be alphanumeric with hyphens/underscores only");
+      }
+
+      const { createProfile, readHermesProfile } = await import("../hermes/profile-fs.js");
+      const cloneFrom = typeof body.cloneFrom === "string" ? body.cloneFrom : "default";
+      const created = createProfile(profileName, cloneFrom);
+      if (!created) {
+        return json(res, { error: `Profile "${profileName}" already exists` }, 409);
+      }
+
+      return json(res, readHermesProfile(profileName), 201);
+    }
+
+    // DELETE /api/hermes/profiles/:name — delete a Hermes profile directory
+    params = matchRoute("/api/hermes/profiles/:name", pathname);
+    if (method === "DELETE" && params) {
+      const { deleteProfile } = await import("../hermes/profile-fs.js");
+      // Guard: check no employee currently uses this profile
+      const { scanOrg } = await import("./org.js");
+      const orgRegistry = scanOrg();
+      for (const [empName, emp] of orgRegistry) {
+        if (emp.hermesProfile === params.name) {
+          return json(res, {
+            error: `Cannot delete profile "${params.name}" — it is used by employee "${empName}"`,
+          }, 409);
+        }
+      }
+      const deleted = deleteProfile(params.name);
+      if (!deleted) return notFound(res);
+      res.writeHead(204);
+      res.end();
+      return;
     }
 
     // GET /api/config
