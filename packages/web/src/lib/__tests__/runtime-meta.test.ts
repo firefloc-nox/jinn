@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getFallbackBannerText,
   getProviderModelLabel,
+  getSessionRuntimeMeta,
   normalizeBrainRoutingMeta,
   normalizeHermesRuntimeMeta,
 } from '../runtime-meta'
@@ -81,5 +82,71 @@ describe('runtime-meta helpers', () => {
     )
 
     expect(text).toBe('Fallback: gemini — Primary engine unavailable')
+  })
+
+  it('returns null when metadata only contains undefined or blank Hermes fields', () => {
+    const meta = normalizeHermesRuntimeMeta({
+      profile: '  ',
+      providerUsed: undefined,
+      model: '',
+      honcho: undefined,
+      mcp: undefined,
+      fallbackExecutor: ' ',
+    })
+
+    expect(meta).toBeNull()
+  })
+
+  it('infers fallback usage from mismatched requested and actual brains', () => {
+    const routing = normalizeBrainRoutingMeta({
+      requestedBrain: 'hermes',
+      actualExecutor: 'claude',
+    })
+
+    expect(routing).toEqual({
+      requestedBrain: 'hermes',
+      actualExecutor: 'claude',
+      fallbackUsed: true,
+      fallbackReason: undefined,
+    })
+  })
+
+  it('reads Hermes metadata from nested routing transport meta', () => {
+    const { hermesRuntimeMeta, routingMeta } = getSessionRuntimeMeta({
+      transportMeta: {
+        routingMeta: {
+          requestedBrain: 'hermes',
+          actualExecutor: 'claude',
+          fallbackReason: 'Primary executor unavailable',
+          hermesRuntimeMeta: {
+            activeProfile: 'ops',
+            providerUsed: 'anthropic',
+            honchoActive: true,
+          },
+        },
+      },
+    })
+
+    expect(hermesRuntimeMeta).toEqual({
+      profile: 'ops',
+      provider: 'anthropic',
+      honcho: true,
+    })
+    expect(routingMeta).toEqual({
+      requestedBrain: 'hermes',
+      actualExecutor: 'claude',
+      fallbackUsed: true,
+      fallbackReason: 'Primary executor unavailable',
+    })
+  })
+
+  it('returns no fallback banner text when no fallback executor is available', () => {
+    expect(getFallbackBannerText(null, null)).toBeNull()
+    expect(
+      getFallbackBannerText(
+        { fallbackReason: 'Primary engine unavailable' },
+        { actualExecutor: 'claude', fallbackUsed: false },
+      ),
+    ).toBeNull()
   })
 })

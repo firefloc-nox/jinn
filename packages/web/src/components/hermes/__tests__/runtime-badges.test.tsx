@@ -46,4 +46,29 @@ describe('RuntimeBadges', () => {
     expect(screen.queryByText('MCP')).toBeNull()
     expect(screen.queryByText('Honcho')).toBeNull()
   })
+
+  it('renders profile, provider/model, and Honcho from metadata even without runtime brain fields', () => {
+    render(
+      <RuntimeBadges
+        hermesRuntimeMeta={{
+          profile: 'research',
+          provider: 'openrouter',
+          model: 'gpt-5.4',
+          honcho: true,
+        }}
+      />,
+    )
+
+    expect(screen.queryByText('Hermes')).toBeNull()
+    expect(screen.getByText('Profile research')).toBeTruthy()
+    expect(screen.getByText('openrouter / gpt-5.4')).toBeTruthy()
+    expect(screen.getByText('Honcho')).toBeTruthy()
+    expect(screen.queryByText('MCP')).toBeNull()
+  })
+
+  it('renders nothing when neither active brain nor Hermes metadata is present', () => {
+    const { container } = render(<RuntimeBadges />)
+
+    expect(container.firstChild).toBeNull()
+  })
 })

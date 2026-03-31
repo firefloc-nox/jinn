@@ -85,4 +85,57 @@ describe('brain-settings helpers', () => {
     expect(sanitized.engines?.hermes?.perEmployeeProfileSelection).toBe(true)
     expect(sanitized.engines?.hermes?.mcpEnabled).toBe(true)
   })
+
+  it('prefers the status API default brain when config has no explicit brain block', () => {
+    const snapshot = getBrainConfigSnapshot(
+      {
+        engines: {
+          default: 'claude',
+          claude: { bin: 'claude', model: 'opus' },
+          hermes: { bin: 'hermes', model: 'gpt-5.4' },
+        },
+      },
+      {
+        defaultBrain: 'hermes',
+        fallbackPolicy: { primary: 'hermes', fallbacks: ['claude', 'codex'] },
+      },
+      ['hermes', 'claude', 'codex'],
+    )
+
+    expect(snapshot).toEqual({
+      primary: 'hermes',
+      fallbacks: ['claude', 'codex'],
+    })
+  })
+
+  it('does not invent unsupported save fields when no brain overrides are present', () => {
+    const sanitized = sanitizeConfigForSave({
+      engines: {
+        default: 'claude',
+        claude: { bin: 'claude', model: 'opus' },
+        hermes: { bin: 'hermes', model: 'gpt-5.4' },
+      },
+      sessions: {
+        fallbackEngines: ['claude'],
+      },
+      mcp: {
+        enabled: true,
+      },
+    })
+
+    expect(sanitized).toEqual({
+      engines: {
+        default: 'claude',
+        claude: { bin: 'claude', model: 'opus' },
+        hermes: { bin: 'hermes', model: 'gpt-5.4' },
+      },
+      sessions: {
+        fallbackEngines: ['claude'],
+      },
+      mcp: {
+        enabled: true,
+      },
+    })
+    expect('brain' in sanitized).toBe(false)
+  })
 })
