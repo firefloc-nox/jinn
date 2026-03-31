@@ -11,7 +11,8 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
 // ---------------------------------------------------------------------------
-// Mocks — must be hoisted before any import of the module under test
+// Mocks — factories may only reference vi.fn() / literal values (hoisted).
+// Classes or `const` defined before vi.mock cannot be accessed from factories.
 // ---------------------------------------------------------------------------
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -27,13 +28,10 @@ vi.mock("node:child_process", async (importOriginal) => {
 vi.mock("node:fs");
 
 // HermesWebAPITransport is called with `new` inside HermesEngine.run().
-// Must use class-based mockImplementation so the constructor works.
-const mockIsAvailable = vi.fn().mockResolvedValue(false);
+// We mock it as a plain vi.fn() here, and wire it in beforeEach via
+// mockImplementation with a regular `function` (not arrow) so `new` works.
 vi.mock("../hermes-webapi.js", () => ({
-  HermesWebAPITransport: vi.fn().mockImplementation(class {
-    isAvailable = mockIsAvailable;
-    static invalidateAvailabilityCache = vi.fn();
-  }),
+  HermesWebAPITransport: vi.fn(),
   runViaWebAPI: vi.fn(),
 }));
 
@@ -43,6 +41,7 @@ vi.mock("../hermes-webapi.js", () => ({
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { HermesWebAPITransport } from "../hermes-webapi.js";
 import { parseHermesOutput, HermesEngine } from "../hermes.js";
 
 // ---------------------------------------------------------------------------
@@ -170,8 +169,16 @@ describe("HermesEngine — CLI fallback path", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Force isAvailable to false so HermesEngine always falls back to CLI
-    mockIsAvailable.mockResolvedValue(false);
+
+    // Wire HermesWebAPITransport as a regular function (can be called with `new`).
+    // Returns an object with isAvailable() that resolves to false → forces CLI path.
+    vi.mocked(HermesWebAPITransport).mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      function () {
+        return { isAvailable: vi.fn().mockResolvedValue(false) };
+      } as unknown as typeof HermesWebAPITransport,
+    );
+
     // Default: execFileSync returns a path for 'which hermes'
     mockExecFileSync.mockReturnValue(
       "/usr/local/bin/hermes\n" as unknown as ReturnType<typeof execFileSync>,
