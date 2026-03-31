@@ -2061,10 +2061,13 @@ Handle this as a priority request from a colleague.`;
     // ── Costs ────────────────────────────────────────────────────────
     // GET /api/costs/summary
     if (method === "GET" && pathname === "/api/costs/summary") {
-      const { getCostSummary } = await import("./costs.js");
+      const { getCostSummary, getHermesCostSummary } = await import("./costs.js");
       const rawPeriod = url.searchParams.get("period") ?? "month";
       const period = (rawPeriod === "day" || rawPeriod === "week" || rawPeriod === "month") ? rawPeriod : "month";
-      return json(res, getCostSummary(period));
+      const jinnSummary = getCostSummary(period);
+      // Enrich with Hermes cost data read directly from state.db (readonly, graceful on failure)
+      const hermesSummary = getHermesCostSummary(period);
+      return json(res, { ...jinnSummary, hermes: hermesSummary });
     }
 
     // GET /api/costs/by-employee
