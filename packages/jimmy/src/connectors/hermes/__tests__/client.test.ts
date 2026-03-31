@@ -371,8 +371,8 @@ describe("SSE parsing (via chatStream mock)", () => {
 
     const { HermesWebAPIClient: Client } = await import("../client.js");
     const c = new Client(8642, "127.0.0.1");
-    // Forcer healthy pour éviter le 503
-    (c as unknown as { healthy: boolean }).healthy = true;
+    // Forcer _healthy pour éviter le 503 (healthy est un getter readonly)
+    (c as unknown as { _healthy: boolean })._healthy = true;
 
     const stream = await c.chatStream("test-session", "Hello");
     const events: Array<{ event: string; data: unknown }> = [];

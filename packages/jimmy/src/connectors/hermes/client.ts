@@ -151,7 +151,12 @@ export class HermesWebAPIClient {
   private readonly baseUrl: string;
   private readonly hostname: string;
   private readonly port: number;
-  healthy: boolean = false;
+  private _healthy: boolean = false;
+
+  /** Indique si le dernier checkHealth() a réussi. Lecture seule. */
+  get healthy(): boolean {
+    return this._healthy;
+  }
 
   constructor(port = 8642, host = "127.0.0.1") {
     this.hostname = host;
@@ -226,10 +231,10 @@ export class HermesWebAPIClient {
   async checkHealth(): Promise<boolean> {
     try {
       const res = await this.request<{ status: string }>("GET", "/health");
-      this.healthy = res.status === "ok";
-      return this.healthy;
+      this._healthy = res.status === "ok";
+      return this._healthy;
     } catch {
-      this.healthy = false;
+      this._healthy = false;
       return false;
     }
   }
