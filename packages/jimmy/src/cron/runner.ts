@@ -33,6 +33,10 @@ export async function runCronJob(
   const sessionKey = `cron:${job.id}:${Date.now()}`;
 
   try {
+    const effectiveEngine = job.engine || employee?.engine || config.engines.default || "hermes";
+    const effectiveModel = job.model || employee?.model ||
+      (config.engines as Record<string, { model?: string } | undefined>)[effectiveEngine]?.model;
+
     const routeResult = await sessionManager.route(
       {
         connector: connector.name,
@@ -63,8 +67,8 @@ export async function runCronJob(
       connector,
       {
         employee,
-        engine: job.engine || employee?.engine || config.engines.default,
-        model: job.model || employee?.model || config.engines[(job.engine || config.engines.default) as "claude" | "codex" | "gemini"]?.model,
+        engine: effectiveEngine,
+        model: effectiveModel,
         title: job.name,
       },
     );
