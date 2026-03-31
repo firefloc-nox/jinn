@@ -173,7 +173,7 @@ function MemoryColumn({
     action: "add" | "replace" | "remove",
     content: string,
     oldText?: string
-  ) => Promise<void>
+  ) => Promise<unknown>
 }) {
   const [showAdd, setShowAdd] = useState(false)
   const [adding, setAdding] = useState(false)
