@@ -25,7 +25,7 @@ This is your home. Every file here is yours to read, write, and manage.
 | `AGENTS.md` | Instructions for Codex sessions |
 | `skills/` | Skill directories, each containing a `SKILL.md` playbook |
 | `org/` | Organizational structure — departments and employees |
-| `cron/` | Scheduled jobs: `jobs.json` + `runs/` for execution logs |
+| `cron/` | Scheduled Jinn-only jobs: `jobs.json` + `runs/` for execution logs. **Hermes jobs are stored in `~/.hermes/cron/jobs.json`** — Jinn reads/writes that file directly (Phase 3, hermes-jobs.ts). The legacy `jinn-hermes-cron-sync` Python bridge is no longer needed. |
 | `docs/` | Architecture documentation for deeper self-awareness |
 | `knowledge/` | Persistent learnings and notes you accumulate over time |
 | `connectors/` | Connector configurations (Slack, email, webhooks, etc.) |
