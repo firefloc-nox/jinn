@@ -53,6 +53,7 @@ import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
 import { loadInstances } from "../cli/instances.js";
+import type { HermesDataConnector } from "../connectors/hermes/index.js";
 
 export interface ApiContext {
   config: JinnConfig;
@@ -1876,6 +1877,114 @@ Handle this as a priority request from a colleague.`;
       return json(res, getBudgetEvents());
     }
 
+    // ── Hermes WebAPI proxy routes (/api/hermes/*) ───────────────────────────
+
+    // GET /api/hermes/health
+    if (method === "GET" && pathname === "/api/hermes/health") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const alive = await hermesConnector.getClient().checkHealth();
+      return json(res, { status: alive ? "ok" : "unavailable" });
+    }
+
+    // GET /api/hermes/sessions
+    if (method === "GET" && pathname === "/api/hermes/sessions") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined;
+      const offset = url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset")!, 10) : undefined;
+      const source = url.searchParams.get("source") ?? undefined;
+      const result = await hermesConnector.getClient().getSessions({ limit, offset, source });
+      return json(res, result);
+    }
+
+    // GET /api/hermes/sessions/search
+    if (method === "GET" && pathname === "/api/hermes/sessions/search") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const q = url.searchParams.get("q") ?? "";
+      const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined;
+      const result = await hermesConnector.getClient().searchSessions(q, limit);
+      return json(res, result);
+    }
+
+    // GET /api/hermes/sessions/:id/messages
+    params = matchRoute("/api/hermes/sessions/:id/messages", pathname);
+    if (method === "GET" && params) {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const messages = await hermesConnector.getClient().getMessages(params.id);
+      return json(res, messages);
+    }
+
+    // GET /api/hermes/sessions/:id
+    params = matchRoute("/api/hermes/sessions/:id", pathname);
+    if (method === "GET" && params) {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const session = await hermesConnector.getClient().getSession(params.id);
+      return json(res, session);
+    }
+
+    // GET /api/hermes/memory
+    if (method === "GET" && pathname === "/api/hermes/memory") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const memory = await hermesConnector.getClient().getMemory();
+      return json(res, memory);
+    }
+
+    // PATCH /api/hermes/memory
+    if (method === "PATCH" && pathname === "/api/hermes/memory") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as Record<string, unknown>;
+      const target = body.target as "memory" | "user" | undefined;
+      const action = body.action as "add" | "replace" | "remove" | undefined;
+      const content = body.content as string | undefined;
+      const old_text = body.old_text as string | undefined;
+      if (!target || !action || content == null) {
+        return badRequest(res, "Required fields: target, action, content");
+      }
+      await hermesConnector.getClient().updateMemory(target, action, content, old_text);
+      return json(res, { status: "ok" });
+    }
+
+    // GET /api/hermes/skills
+    if (method === "GET" && pathname === "/api/hermes/skills") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const skills = await hermesConnector.getClient().getSkills();
+      return json(res, skills);
+    }
+
+    // GET /api/hermes/models
+    if (method === "GET" && pathname === "/api/hermes/models") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermes(res, hermesConnector)) return;
+      const models = await hermesConnector.getClient().getModels();
+      return json(res, models);
+    }
+
+    // GET /api/hermes/cron — lecture directe du filesystem Hermes
+    if (method === "GET" && pathname === "/api/hermes/cron") {
+      const { resolveHermesHome } = await import("../connectors/hermes/client.js");
+      const cronPath = path.join(resolveHermesHome(), "cron", "jobs.json");
+      if (!fs.existsSync(cronPath)) {
+        return json(res, { jobs: [], source: cronPath });
+      }
+      try {
+        const raw = fs.readFileSync(cronPath, "utf-8");
+        const jobs = JSON.parse(raw) as unknown;
+        return json(res, { jobs, source: cronPath });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return serverError(res, `Cannot read Hermes cron jobs: ${msg}`);
+      }
+    }
+
     return notFound(res);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1883,6 +1992,25 @@ Handle this as a priority request from a colleague.`;
     return serverError(res, msg);
   }
 }
+
+// ── Hermes connector helpers ─────────────────────────────────────────────────
+
+function getHermesConnector(context: ApiContext): HermesDataConnector | null {
+  return (context.connectors.get("hermes-data") as HermesDataConnector) ?? null;
+}
+
+function requireHermes(
+  res: ServerResponse,
+  connector: HermesDataConnector | null,
+): connector is HermesDataConnector {
+  if (!connector || !connector.isHealthy()) {
+    json(res, { error: "Hermes WebAPI unavailable" }, 503);
+    return false;
+  }
+  return true;
+}
+
+
 
 /**
  * Parse the output of `npx skills find <query>` into structured results.
