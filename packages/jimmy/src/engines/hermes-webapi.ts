@@ -223,14 +223,15 @@ export class HermesWebAPITransport {
           let interrupted = false;
           let errorMsg = "";
           let done = false;
+          // currentEvent doit persister ENTRE les chunks (un event peut être
+          // découpé : "event:" dans chunk N, "data:" dans chunk N+1).
+          let currentEvent = "";
 
           res.on("data", (chunk: Buffer) => {
             buffer += chunk.toString();
             const lines = buffer.split("\n");
             // La dernière ligne peut être incomplète — la remettre dans le buffer
             buffer = lines.pop() ?? "";
-
-            let currentEvent = "";
             for (const line of lines) {
               if (line.startsWith("event: ")) {
                 currentEvent = line.slice(7).trim();
