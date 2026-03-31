@@ -26,6 +26,7 @@ import { TelegramConnector } from "../connectors/telegram/index.js";
 import { loadJobs } from "../cron/jobs.js";
 import { startScheduler, reloadScheduler, stopScheduler } from "../cron/scheduler.js";
 import { scanOrg } from "./org.js";
+import { HermesDataConnector } from "../connectors/hermes/index.js";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -147,6 +148,7 @@ export async function startGateway(
   }
 
   // Derive connector names from config
+  // NOTE: hermes-data is always started when hermes engine is configured (see below)
   const connectorNames: string[] = [];
   if (config.connectors?.slack?.appToken && config.connectors?.slack?.botToken) {
     connectorNames.push("slack");
@@ -386,6 +388,19 @@ export async function startGateway(
       } catch (err) {
         logger.error(`Failed to start connector instance "${id}": ${err instanceof Error ? err.message : err}`);
       }
+    }
+  }
+
+  // Register HermesDataConnector — toujours si hermes est configuré
+  if (config.engines.hermes) {
+    try {
+      const hermesPort = parseInt(process.env.HERMES_WEBAPI_PORT || "8642", 10);
+      const hermesData = new HermesDataConnector(hermesPort, "127.0.0.1");
+      await hermesData.start();
+      connectors.push(hermesData);
+      connectorMap.set("hermes-data", hermesData);
+    } catch (err) {
+      logger.error(`Failed to start HermesDataConnector: ${err instanceof Error ? err.message : err}`);
     }
   }
 
