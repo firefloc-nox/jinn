@@ -1297,6 +1297,45 @@ export async function handleApiRequest(
       return json(res, { status: "ok" });
     }
 
+    // DELETE /api/org/employees/:name — delete an employee (and optionally the linked Hermes profile)
+    params = matchRoute("/api/org/employees/:name", pathname);
+    if (method === "DELETE" && params) {
+      const { scanOrg, deleteEmployeeYaml } = await import("./org.js");
+      const orgRegistry = scanOrg();
+      const emp = orgRegistry.get(params.name);
+      if (!emp) return notFound(res);
+
+      // Guard: refuse if another employee depends on this one via hermesProfile
+      const deleteHermesProfile = url.searchParams.get("deleteHermesProfile") === "true";
+      if (deleteHermesProfile && emp.hermesProfile) {
+        // Check no other employee uses the same hermesProfile
+        for (const [otherName, otherEmp] of orgRegistry) {
+          if (otherName !== params.name && otherEmp.hermesProfile === emp.hermesProfile) {
+            return json(res, {
+              error: `Cannot delete Hermes profile "${emp.hermesProfile}" — it is also used by employee "${otherName}"`,
+            }, 409);
+          }
+        }
+      }
+
+      const deleted = deleteEmployeeYaml(params.name);
+      if (!deleted) return notFound(res);
+
+      // Optionally delete the linked Hermes profile directory
+      if (deleteHermesProfile && emp.hermesProfile) {
+        const profileDir = path.join(os.homedir(), ".hermes", "profiles", emp.hermesProfile);
+        if (fs.existsSync(profileDir)) {
+          fs.rmSync(profileDir, { recursive: true, force: true });
+          logger.info(`Deleted Hermes profile directory: ${profileDir}`);
+        }
+      }
+
+      context.emit("org:updated", { employee: params.name });
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     // POST /api/org/employees — create a new employee
     if (method === "POST" && pathname === "/api/org/employees") {
       const _parsed = await readJsonBody(req, res);
