@@ -39,6 +39,23 @@ import type { InterruptibleEngine, EngineRunOpts, EngineResult, HermesRuntimeMet
 import { logger } from "../shared/logger.js";
 
 /**
+ * Resolve the model to pass to hermes CLI.
+ * - If no model, returns undefined (hermes uses its own default).
+ * - If already fully qualified ("anthropic/claude-sonnet-4.6", "openai/gpt-4o"), pass through.
+ * - If a bare Claude short-name ("sonnet", "opus", "haiku", "sonnet-4", "opus-4"),
+ *   prefix with "anthropic/claude-" to avoid invalid model errors in hermes.
+ */
+function resolveHermesModel(model?: string): string | undefined {
+  if (!model) return undefined;
+  if (model.includes("/")) return model;
+  const claudeShortNames = new Set(["sonnet", "opus", "haiku", "sonnet-4", "opus-4"]);
+  if (claudeShortNames.has(model.toLowerCase())) {
+    return `anthropic/claude-${model}`;
+  }
+  return model;
+}
+
+/**
  * Resolve the absolute path of a binary, falling back to the name itself.
  * Special case: "hermes" is resolved to hermes.native when the LACP wrapper
  * is detected, to avoid LACP intercepting the spawn in non-interactive mode.
@@ -123,7 +140,8 @@ export class HermesEngine implements InterruptibleEngine {
       "--yolo",
     ];
 
-    if (opts.model) args.push("--model", opts.model);
+    const resolvedModel = resolveHermesModel(opts.model);
+    if (resolvedModel) args.push("--model", resolvedModel);
     if (opts.hermesProvider) args.push("--provider", opts.hermesProvider);
     if (opts.hermesProfile) args.push("--profile", opts.hermesProfile);
     if (opts.hermesToolsets) args.push("--toolsets", opts.hermesToolsets);
@@ -133,7 +151,7 @@ export class HermesEngine implements InterruptibleEngine {
 
     logger.info(
       `Hermes engine starting: ${bin} chat -q [prompt] --quiet --source tool --yolo` +
-      ` --model ${opts.model || "default"}` +
+      ` --model ${resolvedModel || "default"}` +
       ` (resume: ${opts.resumeSessionId || "none"})` +
       (opts.hermesProvider ? ` --provider ${opts.hermesProvider}` : "") +
       (opts.hermesProfile ? ` --profile ${opts.hermesProfile}` : "") +
