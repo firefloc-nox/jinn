@@ -89,9 +89,9 @@ describe('HermesSessionsPage', () => {
     expect(screen.getByText('Discord Session')).toBeDefined()
     expect(screen.getByText('Telegram Session')).toBeDefined()
 
-    // Source badges visible
+    // Source badges visible (multiple elements: filter chip + card badge)
     expect(screen.getAllByText('cli').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('discord')).toBeDefined()
+    expect(screen.getAllByText('discord').length).toBeGreaterThanOrEqual(1)
 
     // Model visible for sessions with one
     expect(screen.getByText('claude-opus-4')).toBeDefined()

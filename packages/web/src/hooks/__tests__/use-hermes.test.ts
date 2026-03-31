@@ -41,7 +41,7 @@ import {
 } from '../use-hermes'
 import { hermesApi, HermesUnavailableError } from '@/lib/hermes-api'
 
-const mockApi = hermesApi as {
+const mockApi = hermesApi as unknown as {
   getHealth: ReturnType<typeof vi.fn>
   getSessions: ReturnType<typeof vi.fn>
   getMemory: ReturnType<typeof vi.fn>
