@@ -1276,11 +1276,21 @@ export async function handleApiRequest(
       const body = _parsed.body as any;
       const { updateEmployeeYaml } = await import("./org.js");
       const updated = updateEmployeeYaml(params.name, {
+        displayName: typeof body.displayName === "string" ? body.displayName : undefined,
+        department: typeof body.department === "string" ? body.department : undefined,
+        rank: (["executive","manager","senior","employee"] as const).includes(body.rank) ? body.rank : undefined,
+        reportsTo: body.reportsTo !== undefined ? (body.reportsTo === null || typeof body.reportsTo === "string" ? body.reportsTo : undefined) : undefined,
+        persona: typeof body.persona === "string" ? body.persona : undefined,
+        engine: typeof body.engine === "string" ? body.engine : undefined,
+        model: body.model !== undefined ? (body.model === null || typeof body.model === "string" ? body.model : undefined) : undefined,
+        fallbackEngine: body.fallbackEngine !== undefined ? (body.fallbackEngine === null || typeof body.fallbackEngine === "string" ? body.fallbackEngine : undefined) : undefined,
+        emoji: body.emoji !== undefined ? (body.emoji === null || typeof body.emoji === "string" ? body.emoji : undefined) : undefined,
         alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
-        hermesProfile: typeof body.hermesProfile === "string" ? body.hermesProfile : undefined,
-        hermesProvider: typeof body.hermesProvider === "string" ? body.hermesProvider : undefined,
-        hermesToolsets: typeof body.hermesToolsets === "string" ? body.hermesToolsets : undefined,
-        hermesSkills: typeof body.hermesSkills === "string" ? body.hermesSkills : undefined,
+        mcp: body.mcp !== undefined ? body.mcp : undefined,
+        hermesProfile: body.hermesProfile !== undefined ? (body.hermesProfile === null || typeof body.hermesProfile === "string" ? body.hermesProfile : undefined) : undefined,
+        hermesProvider: body.hermesProvider !== undefined ? (body.hermesProvider === null || typeof body.hermesProvider === "string" ? body.hermesProvider : undefined) : undefined,
+        hermesToolsets: body.hermesToolsets !== undefined ? (body.hermesToolsets === null || typeof body.hermesToolsets === "string" ? body.hermesToolsets : undefined) : undefined,
+        hermesSkills: body.hermesSkills !== undefined ? (body.hermesSkills === null || typeof body.hermesSkills === "string" ? body.hermesSkills : undefined) : undefined,
       });
       if (!updated) return notFound(res);
       context.emit("org:updated", { employee: params.name });

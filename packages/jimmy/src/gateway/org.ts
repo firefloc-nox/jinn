@@ -96,18 +96,35 @@ function findEmployeeYamlPath(name: string): string | undefined {
 }
 
 /**
- * Update an employee's YAML file. Only alwaysNotify can be changed.
+ * All fields that can be patched on an employee via PATCH /api/org/employees/:name.
+ * Fields that are undefined are left unchanged.
+ */
+export interface UpdateEmployeeFields {
+  displayName?: string;
+  department?: string;
+  rank?: "executive" | "manager" | "senior" | "employee";
+  reportsTo?: string | null;
+  persona?: string;
+  engine?: string;
+  model?: string | null;
+  fallbackEngine?: string | null;
+  emoji?: string | null;
+  alwaysNotify?: boolean;
+  mcp?: boolean | string[] | null;
+  hermesProfile?: string | null;
+  hermesProvider?: string | null;
+  hermesToolsets?: string | null;
+  hermesSkills?: string | null;
+}
+
+/**
+ * Update an employee's YAML file with the provided fields.
+ * Only fields explicitly set (not undefined) are written.
  * Returns true on success, false if employee not found.
  */
 export function updateEmployeeYaml(
   name: string,
-  updates: {
-    alwaysNotify?: boolean;
-    hermesProfile?: string;
-    hermesProvider?: string;
-    hermesToolsets?: string;
-    hermesSkills?: string;
-  },
+  updates: UpdateEmployeeFields,
 ): boolean {
   const filePath = findEmployeeYamlPath(name);
   if (!filePath) return false;
@@ -117,20 +134,87 @@ export function updateEmployeeYaml(
     const data = yaml.load(raw) as Record<string, unknown>;
     if (!data || typeof data !== "object") return false;
 
+    // String fields — set or clear (null removes the key)
+    if (updates.displayName !== undefined) {
+      data.displayName = updates.displayName || undefined;
+    }
+    if (updates.department !== undefined) {
+      data.department = updates.department || undefined;
+    }
+    if (updates.rank !== undefined) {
+      data.rank = updates.rank;
+    }
+    if (updates.reportsTo !== undefined) {
+      if (updates.reportsTo === null || updates.reportsTo === "") {
+        delete data.reportsTo;
+      } else {
+        data.reportsTo = updates.reportsTo;
+      }
+    }
+    if (updates.persona !== undefined) {
+      data.persona = updates.persona || undefined;
+    }
+    if (updates.engine !== undefined) {
+      data.engine = updates.engine || undefined;
+    }
+    if (updates.model !== undefined) {
+      if (updates.model === null || updates.model === "") {
+        delete data.model;
+      } else {
+        data.model = updates.model;
+      }
+    }
+    if (updates.fallbackEngine !== undefined) {
+      if (updates.fallbackEngine === null || updates.fallbackEngine === "") {
+        delete data.fallbackEngine;
+      } else {
+        data.fallbackEngine = updates.fallbackEngine;
+      }
+    }
+    if (updates.emoji !== undefined) {
+      if (updates.emoji === null || updates.emoji === "") {
+        delete data.emoji;
+      } else {
+        data.emoji = updates.emoji;
+      }
+    }
     if (typeof updates.alwaysNotify === "boolean") {
       data.alwaysNotify = updates.alwaysNotify;
     }
+    if (updates.mcp !== undefined) {
+      if (updates.mcp === null) {
+        delete data.mcp;
+      } else {
+        data.mcp = updates.mcp;
+      }
+    }
     if (updates.hermesProfile !== undefined) {
-      data.hermesProfile = updates.hermesProfile || undefined;
+      if (updates.hermesProfile === null || updates.hermesProfile === "") {
+        delete data.hermesProfile;
+      } else {
+        data.hermesProfile = updates.hermesProfile;
+      }
     }
     if (updates.hermesProvider !== undefined) {
-      data.hermesProvider = updates.hermesProvider || undefined;
+      if (updates.hermesProvider === null || updates.hermesProvider === "") {
+        delete data.hermesProvider;
+      } else {
+        data.hermesProvider = updates.hermesProvider;
+      }
     }
     if (updates.hermesToolsets !== undefined) {
-      data.hermesToolsets = updates.hermesToolsets || undefined;
+      if (updates.hermesToolsets === null || updates.hermesToolsets === "") {
+        delete data.hermesToolsets;
+      } else {
+        data.hermesToolsets = updates.hermesToolsets;
+      }
     }
     if (updates.hermesSkills !== undefined) {
-      data.hermesSkills = updates.hermesSkills || undefined;
+      if (updates.hermesSkills === null || updates.hermesSkills === "") {
+        delete data.hermesSkills;
+      } else {
+        data.hermesSkills = updates.hermesSkills;
+      }
     }
 
     fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
