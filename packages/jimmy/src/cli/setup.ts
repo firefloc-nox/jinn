@@ -364,22 +364,26 @@ export async function runSetup(opts?: { force?: boolean }): Promise<void> {
     : "Jinn";
 
   let chosenName = defaultName;
-  let chosenEngine: "claude" | "codex" = "claude";
+  // hermes is the primary brain; claude/codex are fallback engines
+  let chosenEngine: import("../shared/types.js").EngineType = "hermes";
 
   if (isInteractive) {
     console.log("");
     chosenName = await prompt("What should your AI assistant be called?", defaultName);
 
-    // Determine available engines
+    // Determine available engines — hermes first if detected
     const engines: string[] = [];
+    if (hermesAvailable) engines.push("hermes");
     if (claudePath) engines.push("claude");
     if (codexPath) engines.push("codex");
 
-    if (engines.length === 2) {
-      const engineAnswer = await prompt("Preferred engine? (claude/codex)", "claude");
-      chosenEngine = engineAnswer === "codex" ? "codex" : "claude";
+    if (engines.length > 1) {
+      const defaultChoice = hermesAvailable ? "hermes" : engines[0];
+      const choiceList = engines.join("/");
+      const engineAnswer = await prompt(`Preferred engine? (${choiceList})`, defaultChoice);
+      chosenEngine = engines.includes(engineAnswer) ? engineAnswer : defaultChoice;
     } else if (engines.length === 1) {
-      chosenEngine = engines[0] as "claude" | "codex";
+      chosenEngine = engines[0];
       ok(`Using ${chosenEngine} as default engine (only engine installed)`);
     }
   }
@@ -401,21 +405,11 @@ export async function runSetup(opts?: { force?: boolean }): Promise<void> {
       : DEFAULT_CONFIG;
     // Stamp the current package version into the config
     source = source.replace(/version:\s*"[^"]*"/, `version: "${getPackageVersion()}"`);
-    // Apply interactive choices
-    source = source.replace(/default:\s*claude/, `default: ${chosenEngine}`);
+    // Apply interactive choices — replace default engine and brain.primary with user's choice
+    source = source.replace(/^(\s+default:\s*)\w+/m, `$1${chosenEngine}`);
+    source = source.replace(/^(\s+primary:\s*)\w+/m, `$1${chosenEngine}`);
     if (chosenName !== "Jinn") {
       source = source.replace("portal: {}", `portal:\n  portalName: "${chosenName}"`);
-    }
-    // If hermes is available, add it to the config and set as default brain
-    if (hermesAvailable) {
-      if (!source.includes("hermes:")) {
-        source = source.replace(
-          /connectors:/,
-          `  hermes:\n    bin: hermes\n    model: default\nconnectors:`,
-        );
-      }
-      // Set hermes as default engine
-      source = source.replace(/default:\s*\w+/, "default: hermes");
     }
     ensureFile(CONFIG_PATH, source);
     created.push(CONFIG_PATH);
