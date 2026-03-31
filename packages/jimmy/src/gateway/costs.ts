@@ -1,5 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
+import Database from 'better-sqlite3';
 import { initDb } from '../sessions/registry.js';
 
 export interface CostSummary {
@@ -24,18 +25,9 @@ export function getHermesCostSummary(period: 'day' | 'week' | 'month' = 'month')
   const hermesHome = process.env.HERMES_HOME ?? path.join(os.homedir(), '.hermes');
   const dbPath = path.join(hermesHome, 'state.db');
 
-  let BetterSqlite3: typeof import('better-sqlite3');
+  let db: Database.Database;
   try {
-    // Dynamic require — better-sqlite3 is already a dep of jimmy (used by Goals)
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    BetterSqlite3 = require('better-sqlite3') as typeof import('better-sqlite3');
-  } catch {
-    return { totalEstimatedCostUsd: 0, sessionCount: 0, available: false };
-  }
-
-  let db: import('better-sqlite3').Database;
-  try {
-    db = new BetterSqlite3(dbPath, { readonly: true });
+    db = new Database(dbPath, { readonly: true });
   } catch {
     return { totalEstimatedCostUsd: 0, sessionCount: 0, available: false };
   }
