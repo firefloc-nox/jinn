@@ -422,6 +422,9 @@ function buildConfigContext(config: JinnConfig, gatewayUrl: string): string {
   const lines: string[] = [`## Current configuration`];
   lines.push(`- Gateway: ${gatewayUrl}`);
   lines.push(`- Default engine: ${config.engines.default}`);
+  if (config.engines.hermes?.model) {
+    lines.push(`- Hermes model: ${config.engines.hermes.model}`);
+  }
   if (config.engines.claude?.model) {
     lines.push(`- Claude model: ${config.engines.claude.model}`);
   }
@@ -691,12 +694,12 @@ function buildEvolutionContext(portalName: string): string {
  * Verbose examples and multi-paragraph explanations have been trimmed.
  */
 function buildDelegationProtocol(gatewayUrl: string, _portalName: string, config?: JinnConfig): string {
-  const defaultEngine = config?.engines.default || "claude";
-  const engineConfig = defaultEngine === "codex"
-    ? config?.engines.codex
-    : defaultEngine === "gemini"
-      ? config?.engines.gemini ?? config?.engines.claude
-      : config?.engines.claude;
+  // hermes is the primary brain; fall back to hermes config, then claude, never hardcode claude first
+  const defaultEngine = config?.engines.default || "hermes";
+  const enginesMap = config?.engines as unknown as Record<string, import("../shared/types.js").EngineConfig | undefined> | undefined;
+  const engineConfig = enginesMap?.[defaultEngine]
+    ?? config?.engines.hermes
+    ?? config?.engines.claude;
   const childOverride = engineConfig?.childEffortOverride;
 
   const effortOverrideNote = childOverride
