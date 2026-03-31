@@ -859,11 +859,27 @@ export class SessionManager {
             return `- ${candidate.name}: ${health.status}${health.detail ? ` (${health.detail})` : ""}`;
           })
         : ["- none"];
+      // Build engine status lines dynamically — hermes first as primary brain
+      const activeBrain = this.config.brain?.primary ?? this.config.engines.default;
+      const activeModel = (this.config.engines as unknown as Record<string, import("../shared/types.js").EngineConfig | undefined>)[activeBrain]?.model ?? "unknown";
+      const engineLines: string[] = [
+        `Active brain: ${activeBrain} (${activeModel})`,
+      ];
+      if (this.config.engines.hermes && activeBrain !== "hermes") {
+        engineLines.push(`Hermes: ${this.config.engines.hermes.model}`);
+      }
+      if (this.config.engines.claude) {
+        engineLines.push(`Claude: ${this.config.engines.claude.model}`);
+      }
+      if (this.config.engines.codex) {
+        engineLines.push(`Codex: ${this.config.engines.codex.model}`);
+      }
+      if (this.config.engines.gemini) {
+        engineLines.push(`Gemini: ${this.config.engines.gemini.model}`);
+      }
       const info = [
         `Default engine: ${this.config.engines.default}`,
-        `Claude: ${this.config.engines.claude.model}`,
-        `Codex: ${this.config.engines.codex.model}`,
-        ...(this.config.engines.gemini ? [`Gemini: ${this.config.engines.gemini.model}`] : []),
+        ...engineLines,
         "Connectors:",
         ...connectorLines,
       ].join("\n");

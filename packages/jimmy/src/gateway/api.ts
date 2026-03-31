@@ -343,16 +343,19 @@ export async function handleApiRequest(
         Array.from(context.connectors.values()).map((connector) => [connector.name, connector.getHealth()]),
       );
 
-      // Build registered engines list dynamically (hermes included if configured)
-      const registeredEngines: Record<string, { model: string; available: boolean }> = {
-        claude: { model: config.engines.claude.model, available: true },
-        codex: { model: config.engines.codex.model, available: true },
-      };
-      if (config.engines.gemini) {
-        registeredEngines.gemini = { model: config.engines.gemini.model, available: true };
-      }
+      // Build registered engines list dynamically from config.engines (hermes first)
+      const registeredEngines: Record<string, { model: string; available: boolean }> = {};
       if (config.engines.hermes) {
         registeredEngines.hermes = { model: config.engines.hermes.model, available: true };
+      }
+      if (config.engines.claude) {
+        registeredEngines.claude = { model: config.engines.claude.model, available: true };
+      }
+      if (config.engines.codex) {
+        registeredEngines.codex = { model: config.engines.codex.model, available: true };
+      }
+      if (config.engines.gemini) {
+        registeredEngines.gemini = { model: config.engines.gemini.model, available: true };
       }
 
       // Determine effective default brain: prefer hermes if configured, else config.engines.default
@@ -368,9 +371,9 @@ export async function handleApiRequest(
           default: config.engines.default,
           defaultBrain,
           registered: registeredEngines,
-          // Legacy fields for backwards compat
-          claude: { model: config.engines.claude.model, available: true },
-          codex: { model: config.engines.codex.model, available: true },
+          // Legacy fields for backwards compat — conditional on config presence
+          ...(config.engines.claude ? { claude: { model: config.engines.claude.model, available: true } } : {}),
+          ...(config.engines.codex ? { codex: { model: config.engines.codex.model, available: true } } : {}),
           ...(config.engines.gemini ? { gemini: { model: config.engines.gemini.model, available: true } } : {}),
           ...(config.engines.hermes ? { hermes: { model: config.engines.hermes.model, available: true } } : {}),
         },
@@ -2103,8 +2106,8 @@ async function runWebSession(
         : currentSession.engine === "codex"
           ? config.engines.codex
           : currentSession.engine === "gemini"
-            ? (config.engines.gemini ?? config.engines.claude)
-            : config.engines.claude;
+            ? (config.engines.gemini ?? config.engines.hermes ?? config.engines.claude)
+            : (config.engines.hermes ?? config.engines.claude ?? ({} as import("../shared/types.js").EngineConfig));
     const effortLevel = resolveEffort(engineConfig, currentSession, employee);
 
     let lastHeartbeatAt = 0;
