@@ -6,22 +6,12 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { api } from "@/lib/api";
+import { api, type SessionRecord } from "@/lib/api";
 import { useSettings } from "@/app/settings-provider";
+import { RuntimeBadges } from "@/components/hermes/runtime-badges";
+import { getSessionRuntimeMeta } from "@/lib/runtime-meta";
 
-interface Session {
-  id: string;
-  engine: string;
-  source: string;
-  connector: string | null;
-  sessionKey: string;
-  employee: string | null;
-  title: string | null;
-  status: "idle" | "running" | "error";
-  transportState?: "idle" | "queued" | "running" | "error";
-  queueDepth?: number;
-  lastActivity: string;
-}
+type Session = SessionRecord
 
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   idle: "secondary",
@@ -141,6 +131,18 @@ export function SessionList({
                     <span>{s.employee || portalName}</span>
                     {typeof s.queueDepth === "number" && s.queueDepth > 0 ? <span>Queue {s.queueDepth}</span> : null}
                   </div>
+                  {(() => {
+                    const { hermesRuntimeMeta, routingMeta } = getSessionRuntimeMeta(s)
+                    return (
+                      <RuntimeBadges
+                        className="mt-2"
+                        compact
+                        requestedBrain={routingMeta?.requestedBrain ?? s.engine}
+                        actualExecutor={routingMeta?.actualExecutor ?? s.engine}
+                        hermesRuntimeMeta={hermesRuntimeMeta}
+                      />
+                    )
+                  })()}
                 </div>
               </div>
 

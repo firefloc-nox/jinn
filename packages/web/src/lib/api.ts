@@ -55,6 +55,88 @@ export interface OrgData {
   hierarchy: OrgHierarchy;
 }
 
+export interface HermesRuntimeMeta {
+  hermesSessionId?: string
+  profile?: string
+  activeProfile?: string
+  provider?: string
+  providerUsed?: string
+  model?: string
+  modelUsed?: string
+  honcho?: boolean
+  honchoActive?: boolean
+  mcp?: boolean
+  fallbackExecutor?: string
+  fallbackReason?: string
+}
+
+export interface BrainRoutingMeta {
+  requestedBrain: string
+  actualExecutor: string
+  fallbackUsed?: boolean
+  fallbackReason?: string
+  hermesRuntimeMeta?: HermesRuntimeMeta
+}
+
+export interface SessionTransportMeta {
+  hermesMeta?: HermesRuntimeMeta
+  hermesRuntimeMeta?: HermesRuntimeMeta
+  routingMeta?: BrainRoutingMeta
+  engineOverride?: Record<string, unknown>
+  engineSessions?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface SessionRecord {
+  id: string
+  engine: string
+  engineSessionId: string | null
+  source: string
+  sourceRef: string
+  connector: string | null
+  sessionKey: string
+  replyContext: Record<string, unknown> | null
+  transportMeta?: SessionTransportMeta | null
+  messageId: string | null
+  employee: string | null
+  model: string | null
+  title: string | null
+  parentSessionId: string | null
+  status: 'idle' | 'running' | 'error' | 'waiting' | 'paused' | 'interrupted'
+  transportState?: 'idle' | 'queued' | 'running' | 'error' | 'waiting' | 'paused' | 'interrupted'
+  queueDepth?: number
+  createdAt: string
+  lastActivity: string
+  lastError: string | null
+  messages?: Array<Record<string, unknown>>
+  history?: Array<Record<string, unknown>>
+  paused?: boolean
+  [key: string]: unknown
+}
+
+export interface StatusResponse {
+  status?: string
+  uptime?: number
+  port?: number
+  defaultBrain?: string
+  registeredEngines?: string[]
+  fallbackPolicy?: { primary?: string; fallbacks?: string[] } | null
+  engines?: {
+    default?: string
+    defaultBrain?: string
+    registered?: Record<string, { model?: string; available?: boolean }>
+    [key: string]: unknown
+  }
+  brain?: {
+    primary?: string
+    fallbacks?: string[]
+    fallbackPolicy?: { primary?: string; fallbacks?: string[] } | null
+  }
+  sessions?: { active?: number; running?: number; total?: number }
+  connectors?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 const BASE =
   typeof window !== "undefined"
     ? window.location.origin
@@ -121,12 +203,12 @@ interface UploadedFile {
 }
 
 export const api = {
-  getStatus: () => get<Record<string, unknown>>("/api/status"),
-  getSessions: () => get<Record<string, unknown>[]>("/api/sessions"),
-  getSession: (id: string) => get<Record<string, unknown>>(`/api/sessions/${id}`),
-  getSessionChildren: (id: string) => get<Record<string, unknown>[]>(`/api/sessions/${id}/children`),
+  getStatus: () => get<StatusResponse>("/api/status"),
+  getSessions: () => get<SessionRecord[]>("/api/sessions"),
+  getSession: (id: string) => get<SessionRecord>(`/api/sessions/${id}`),
+  getSessionChildren: (id: string) => get<SessionRecord[]>(`/api/sessions/${id}/children`),
   updateSession: (id: string, data: { title?: string }) =>
-    put<Record<string, unknown>>(`/api/sessions/${id}`, data),
+    put<SessionRecord>(`/api/sessions/${id}`, data),
   deleteSession: (id: string) => del<Record<string, unknown>>(`/api/sessions/${id}`),
   duplicateSession: (id: string) =>
     post<Record<string, unknown>>(`/api/sessions/${id}/duplicate`, {}),

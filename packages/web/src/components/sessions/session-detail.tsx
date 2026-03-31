@@ -8,31 +8,13 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { api } from "@/lib/api";
+import { api, type SessionRecord } from "@/lib/api";
 import { useSettings } from "@/app/settings-provider";
 import { useResetSession } from "@/hooks/use-sessions";
+import { RuntimeBadges } from "@/components/hermes/runtime-badges";
+import { getFallbackBannerText, getSessionRuntimeMeta } from "@/lib/runtime-meta";
 
-interface Session {
-  id: string;
-  engine: string;
-  engineSessionId: string | null;
-  source: string;
-  sourceRef: string;
-  connector: string | null;
-  sessionKey: string;
-  replyContext: Record<string, unknown> | null;
-  messageId: string | null;
-  employee: string | null;
-  model: string | null;
-  title: string | null;
-  parentSessionId: string | null;
-  status: "idle" | "running" | "error" | "waiting" | "paused";
-  transportState?: "idle" | "queued" | "running" | "error" | "waiting" | "paused";
-  queueDepth?: number;
-  createdAt: string;
-  lastActivity: string;
-  lastError: string | null;
-}
+type Session = SessionRecord
 
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   idle: "secondary",
@@ -74,6 +56,8 @@ export function SessionDetail({
   const [children, setChildren] = useState<Session[]>([]);
   const resetSession = useResetSession();
   const canReset = ["error", "waiting", "paused"].includes(session.status);
+  const { hermesRuntimeMeta, routingMeta } = getSessionRuntimeMeta(session)
+  const fallbackBanner = getFallbackBannerText(hermesRuntimeMeta, routingMeta)
 
   useEffect(() => {
     api.getSessionChildren(session.id)
@@ -90,6 +74,24 @@ export function SessionDetail({
       </CardHeader>
       <CardContent>
         <div className="flex flex-col">
+          <RuntimeBadges
+            className="mb-[var(--space-3)]"
+            requestedBrain={routingMeta?.requestedBrain ?? session.engine}
+            actualExecutor={routingMeta?.actualExecutor ?? session.engine}
+            hermesRuntimeMeta={hermesRuntimeMeta}
+          />
+
+          {fallbackBanner && (
+            <div
+              className="mb-[var(--space-3)] rounded-[var(--radius-sm,8px)] px-[var(--space-3)] py-[var(--space-2)] text-[length:var(--text-caption1)] text-[var(--system-orange)]"
+              style={{
+                background: 'color-mix(in srgb, var(--system-orange) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--system-orange) 24%, transparent)',
+              }}
+            >
+              {fallbackBanner}
+            </div>
+          )}
           <Field
             label="Session ID"
             value={
