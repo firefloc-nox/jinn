@@ -94,6 +94,22 @@ export function buildContext(opts: {
     });
   }
 
+  // ── ESSENTIAL: User-defined instructions (CLAUDE.md) ────────
+  {
+    const claudeMdPath = path.join(JINN_HOME, "CLAUDE.md");
+    try {
+      const claudeMd = fs.readFileSync(claudeMdPath, "utf-8").trim();
+      if (claudeMd) {
+        sections.push({
+          tier: Tier.ESSENTIAL,
+          marker: "## User instructions",
+          content: claudeMd,
+          summary: "## User instructions\n(from ~/.jinn/CLAUDE.md)",
+        });
+      }
+    } catch { /* no CLAUDE.md — skip */ }
+  }
+
   // ── STANDARD: Self-evolution ────────────────────────────────
   if (!opts.employee) {
     sections.push({
