@@ -1,3 +1,6 @@
+import type { BoardConfig, BoardCard, BoardColumn } from './boards/types'
+export type { BoardConfig, BoardCard, BoardColumn }
+
 export interface TranscriptContentBlock {
   type: 'text' | 'tool_use' | 'tool_result' | 'thinking'
   text?: string
@@ -367,6 +370,32 @@ export const api = {
 
   patchCard: (dept: string, cardId: string, fields: Record<string, unknown>) =>
     patch<Record<string, unknown>>(`/api/org/departments/${dept}/board/cards/${cardId}`, fields),
+
+  // ── Boards API ───────────────────────────────────────────────────────────
+  listBoards: () => get<BoardConfig[]>('/api/boards'),
+  createBoard: (data: { name: string; description?: string; columns?: BoardColumn[] }) =>
+    post<BoardConfig>('/api/boards', data),
+  getBoard: (id: string) => get<{ config: BoardConfig; cards: BoardCard[] }>(`/api/boards/${id}`),
+  updateBoard: (id: string, data: Partial<BoardConfig>) =>
+    patch<BoardConfig>(`/api/boards/${id}`, data),
+  deleteBoard: (id: string) => del<void>(`/api/boards/${id}`),
+  // Cards
+  getBoardCards: (id: string) => get<BoardCard[]>(`/api/boards/${id}/cards`),
+  createBoardCard: (boardId: string, data: Partial<BoardCard> & { title: string; columnId: string }) =>
+    post<BoardCard>(`/api/boards/${boardId}/cards`, data),
+  patchBoardCard: (boardId: string, cardId: string, data: Partial<BoardCard>) =>
+    patch<BoardCard>(`/api/boards/${boardId}/cards/${cardId}`, data),
+  deleteBoardCard: (boardId: string, cardId: string) =>
+    del<void>(`/api/boards/${boardId}/cards/${cardId}`),
+  // Columns
+  addColumn: (boardId: string, data: { title: string; color?: string }) =>
+    post<BoardConfig>(`/api/boards/${boardId}/columns`, data),
+  updateColumn: (boardId: string, colId: string, data: { title?: string; color?: string }) =>
+    patch<BoardConfig>(`/api/boards/${boardId}/columns/${colId}`, data),
+  deleteColumn: (boardId: string, colId: string) =>
+    del<BoardConfig>(`/api/boards/${boardId}/columns/${colId}`),
+  reorderColumns: (boardId: string, order: string[]) =>
+    put<BoardConfig>(`/api/boards/${boardId}/columns/reorder`, order),
 
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
