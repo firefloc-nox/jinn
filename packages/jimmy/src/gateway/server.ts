@@ -31,6 +31,7 @@ import { loadJobs } from "../cron/jobs.js";
 import { startScheduler, reloadScheduler, stopScheduler } from "../cron/scheduler.js";
 import { scanOrg } from "./org.js";
 import { HermesDataConnector } from "../connectors/hermes/index.js";
+import { gatewayEventBus } from "./event-bus.js";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -529,6 +530,7 @@ export async function startGateway(
   // Initialize workflow engine
   workflowEngine.setServices({ sessionManager });
   workflowEngine.loadAll();
+  workflowEngine.setContext(gatewayEventBus);
 
   // Mutable config reference for hot-reload
   let currentConfig = config;
