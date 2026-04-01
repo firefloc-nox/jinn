@@ -31,7 +31,7 @@ export function scanOrg(): Map<string, Employee> {
               department:
                 data.department || path.basename(path.dirname(fullPath)),
               rank: data.rank || "employee",
-              engine: data.engine || "claude",
+              engine: data.engine || "hermes",
               model: data.model || undefined,
               persona: data.persona,
               emoji: typeof data.emoji === "string" ? data.emoji : undefined,
