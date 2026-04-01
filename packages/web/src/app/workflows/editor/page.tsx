@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ReactFlow, Background, MiniMap, Controls, BackgroundVariant,
@@ -10,7 +10,7 @@ import '@xyflow/react/dist/style.css'
 import { PageLayout } from '@/components/page-layout'
 import { api } from '@/lib/api'
 import { useWorkflowStore } from '@/lib/workflows/store'
-import { workflowNodeTypes } from '@/components/workflows/nodes'
+import { workflowNodeTypes, ModeNode } from '@/components/workflows/nodes'
 import { NodePalette } from '@/components/workflows/node-palette'
 import { PropertiesPanel } from '@/components/workflows/properties-panel'
 import { useBreadcrumbs } from '@/context/breadcrumb-context'
@@ -54,9 +54,19 @@ function Toolbar({ workflow, isDirty, onSave, onTestRun, onToggle }: ToolbarProp
 
       <div style={{ height: 20, width: 1, background: 'var(--separator)' }} />
 
-      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
         {workflow?.name ?? 'Loading…'}
-        {isDirty && <span style={{ color: 'var(--text-tertiary)', fontWeight: 400, fontSize: 13 }}> (unsaved)</span>}
+        {isDirty && (
+          <span
+            title="Unsaved changes"
+            style={{
+              display: 'inline-block',
+              width: 8, height: 8, borderRadius: '50%',
+              background: '#f97316',
+              flexShrink: 0,
+            }}
+          />
+        )}
       </span>
 
       {workflow && (
@@ -113,6 +123,8 @@ export default function WorkflowEditorPage() {
   const { pushFromEvent } = useNotifications()
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const dragTypeRef = useRef<NodeType | null>(null)
+  const modeDragTypeRef = useRef<string | null>(null)
+  const [modeNodeTypes, setModeNodeTypes] = useState<string[]>([])
 
   const {
     nodes, edges, definition, isDirty,
@@ -124,6 +136,27 @@ export default function WorkflowEditorPage() {
     { label: 'Workflows', href: '/workflows' },
     { label: definition?.name ?? '…' },
   ])
+
+  // Load mode node types for dynamic registration
+  useEffect(() => {
+    api.getNodeTypes()
+      .then((data) => {
+        const resp = data as unknown as { base?: string[]; modes?: Array<{ type: string; label: string; category: string }> }
+        if (resp?.modes) {
+          setModeNodeTypes(resp.modes.map((m) => m.type))
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Dynamic nodeTypes: base types + mode types all mapped to ModeNode
+  const nodeTypes = useMemo(() => {
+    const extra: Record<string, typeof ModeNode> = {}
+    for (const t of modeNodeTypes) {
+      extra[t] = ModeNode
+    }
+    return { ...workflowNodeTypes, ...extra }
+  }, [modeNodeTypes])
 
   // Load workflow
   useEffect(() => {
@@ -181,19 +214,40 @@ export default function WorkflowEditorPage() {
   function handleDragStart(event: React.DragEvent, type: NodeType) {
     event.dataTransfer.effectAllowed = 'move'
     dragTypeRef.current = type
+    modeDragTypeRef.current = null
+  }
+
+  function handleModeDragStart(event: React.DragEvent, type: string) {
+    event.dataTransfer.effectAllowed = 'move'
+    modeDragTypeRef.current = type
+    dragTypeRef.current = null
   }
 
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
-      const type = dragTypeRef.current
-      if (!type || !rfInstance) return
-      dragTypeRef.current = null
+      if (!rfInstance) return
 
       const position = rfInstance.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       })
+
+      if (modeDragTypeRef.current) {
+        const modeType = modeDragTypeRef.current
+        modeDragTypeRef.current = null
+        addNode({
+          id: makeNodeId(),
+          type: modeType as NodeType,
+          position,
+          config: { nodeType: modeType, modeType },
+        })
+        return
+      }
+
+      const type = dragTypeRef.current
+      if (!type) return
+      dragTypeRef.current = null
 
       addNode({
         id: makeNodeId(),
@@ -226,7 +280,7 @@ export default function WorkflowEditorPage() {
 
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
           {/* Node Palette */}
-          <NodePalette onDragStart={handleDragStart} />
+          <NodePalette onDragStart={handleDragStart} onModeDragStart={handleModeDragStart} />
 
           {/* Canvas */}
           <div
@@ -242,7 +296,7 @@ export default function WorkflowEditorPage() {
               onConnect={onConnect}
               onNodeClick={handleNodeClick}
               onPaneClick={handlePaneClick}
-              nodeTypes={workflowNodeTypes}
+              nodeTypes={nodeTypes}
               onInit={setRfInstance}
               fitView
               proOptions={{ hideAttribution: true }}
