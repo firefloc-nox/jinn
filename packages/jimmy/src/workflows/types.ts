@@ -109,9 +109,11 @@ export interface WorkflowNode {
 }
 
 export interface WorkflowEdge {
-  from: string;
-  to: string;
+  id?: string;
+  source: string;
+  target: string;
   label?: string;
+  condition?: 'true' | 'false';
 }
 
 export interface WorkflowDefinition {

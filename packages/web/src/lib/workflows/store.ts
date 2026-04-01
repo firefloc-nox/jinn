@@ -13,17 +13,18 @@ import {
 import type { WorkflowDefinition, WorkflowNode, WorkflowEdge, StepStatus } from './types'
 
 function defNodeToRF(n: WorkflowNode): Node {
+  const nodeType = n.type.toUpperCase() as WorkflowNode['type']
   return {
     id: n.id,
-    type: n.type.toLowerCase(),
+    type: n.type.toLowerCase(),  // react flow node type key (matches registered nodeTypes)
     position: n.position ?? { x: 0, y: 0 },
-    data: { ...n.config, nodeType: n.type },
+    data: { ...n.config, nodeType },  // nodeType in UPPERCASE for display/logic
   }
 }
 
 function defEdgeToRF(e: WorkflowEdge): Edge {
   return {
-    id: e.id,
+    id: e.id ?? `e-${e.source}-${e.target}`,
     source: e.source,
     target: e.target,
     label: e.label,

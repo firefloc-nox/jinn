@@ -91,8 +91,8 @@ const discordMode: ModeDefinition = {
           { id: 'end', type: NodeType.DONE, position: { x: 600, y: 200 }, config: {} },
         ],
         edges: [
-          { from: 'start', to: 'notify' },
-          { from: 'notify', to: 'end' },
+          { id: 'e1', source: 'start', target: 'notify' },
+          { id: 'e2', source: 'notify', target: 'end' },
         ],
       },
     },
@@ -124,9 +124,9 @@ const discordMode: ModeDefinition = {
           { id: 'end', type: NodeType.DONE, position: { x: 850, y: 200 }, config: {} },
         ],
         edges: [
-          { from: 'start', to: 'agent' },
-          { from: 'agent', to: 'notify' },
-          { from: 'notify', to: 'end' },
+          { id: 'e1', source: 'start', target: 'agent' },
+          { id: 'e2', source: 'agent', target: 'notify' },
+          { id: 'e3', source: 'notify', target: 'end' },
         ],
       },
     },

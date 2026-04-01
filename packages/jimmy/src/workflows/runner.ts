@@ -210,9 +210,9 @@ export class WorkflowRunner extends EventEmitter {
     // Build edge map: nodeId -> [nextNodeIds]
     const edgeMap = new Map<string, string[]>();
     for (const edge of def.edges) {
-      const existing = edgeMap.get(edge.from) ?? [];
-      existing.push(edge.to);
-      edgeMap.set(edge.from, existing);
+      const existing = edgeMap.get(edge.source) ?? [];
+      existing.push(edge.target);
+      edgeMap.set(edge.source, existing);
     }
 
     // Build node map
@@ -371,9 +371,9 @@ export class WorkflowRunner extends EventEmitter {
     const def = this.loadDefinition(run.workflow_id);
     const edgeMap = new Map<string, string[]>();
     for (const edge of def.edges) {
-      const existing = edgeMap.get(edge.from) ?? [];
-      existing.push(edge.to);
-      edgeMap.set(edge.from, existing);
+      const existing = edgeMap.get(edge.source) ?? [];
+      existing.push(edge.target);
+      edgeMap.set(edge.source, existing);
     }
 
     const currentNodeId = run.current_node_id;
@@ -408,9 +408,9 @@ export class WorkflowRunner extends EventEmitter {
   ): Promise<void> {
     const edgeMap = new Map<string, string[]>();
     for (const edge of def.edges) {
-      const existing = edgeMap.get(edge.from) ?? [];
-      existing.push(edge.to);
-      edgeMap.set(edge.from, existing);
+      const existing = edgeMap.get(edge.source) ?? [];
+      existing.push(edge.target);
+      edgeMap.set(edge.source, existing);
     }
 
     const nodeMap = new Map(def.nodes.map((n) => [n.id, n]));

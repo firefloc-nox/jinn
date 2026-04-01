@@ -11,7 +11,7 @@ export interface WorkflowNode {
 }
 
 export interface WorkflowEdge {
-  id: string
+  id?: string
   source: string
   target: string
   label?: string
