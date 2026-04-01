@@ -405,8 +405,11 @@ function ChatPage() {
           {sessionMeta?.engineSessionId && (
             <button
               onClick={() => {
-                const cli = sessionMeta.engine === 'codex' ? 'codex' : 'claude'
-                copyToClipboard(`${cli} --resume ${sessionMeta.engineSessionId}`, 'cli')
+                const cli = sessionMeta.engine === 'codex' ? 'codex' : sessionMeta.engine === 'hermes' ? 'hermes' : 'claude'
+                const resumeCmd = cli === 'hermes'
+                  ? `hermes chat --resume ${sessionMeta.engineSessionId}`
+                  : `${cli} --resume ${sessionMeta.engineSessionId}`
+                copyToClipboard(resumeCmd, 'cli')
               }}
               className="block w-full px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent"
             >
