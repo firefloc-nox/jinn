@@ -128,6 +128,16 @@ export default function WorkflowEditorPage() {
   // Load workflow
   useEffect(() => {
     if (!id) return
+    // Reset store on new workflow load
+    useWorkflowStore.getState().setDefinition({
+      id: '',
+      name: '',
+      enabled: false,
+      version: 1,
+      trigger: { type: 'manual' },
+      nodes: [],
+      edges: [],
+    })
     api.getWorkflow(id)
       .then((data) => setDefinition(data as unknown as WorkflowDefinition))
       .catch(() => {})
@@ -180,10 +190,9 @@ export default function WorkflowEditorPage() {
       if (!type || !rfInstance) return
       dragTypeRef.current = null
 
-      const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
       const position = rfInstance.screenToFlowPosition({
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top,
+        x: event.clientX,
+        y: event.clientY,
       })
 
       addNode({
