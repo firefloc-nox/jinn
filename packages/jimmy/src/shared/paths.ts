@@ -34,3 +34,5 @@ export const TEMPLATE_MIGRATIONS_DIR = path.join(TEMPLATE_DIR, "migrations");
 
 /** Path to the global instances registry (always in default ~/.jinn/) */
 export const INSTANCES_REGISTRY = path.join(os.homedir(), ".jinn", "instances.json");
+
+export const WORKFLOWS_DIR = path.join(JINN_HOME, 'workflows', 'definitions');
