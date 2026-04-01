@@ -1267,7 +1267,25 @@ export async function handleApiRequest(
       const { scanOrg } = await import("./org.js");
       const { resolveOrgHierarchy } = await import("./org-hierarchy.js");
       const orgRegistry = scanOrg();
-      const emp = orgRegistry.get(params.name);
+      let emp = orgRegistry.get(params.name);
+
+      // Synthetic COO fallback — not stored as a YAML file
+      if (!emp) {
+        const cfg = context.getConfig();
+        const portalName = cfg.portal?.portalName || "Jinn";
+        const cooName = portalName.toLowerCase().replace(/\s+/g, "-");
+        if (params.name === cooName) {
+          emp = {
+            name: cooName,
+            displayName: portalName,
+            rank: "executive",
+            engine: "hermes",
+            hermesProfile: cfg.portal?.hermesProfile || undefined,
+            persona: "COO and AI gateway orchestrator",
+          } as any;
+        }
+      }
+
       if (!emp) return notFound(res);
 
       const hierarchy = resolveOrgHierarchy(orgRegistry);
