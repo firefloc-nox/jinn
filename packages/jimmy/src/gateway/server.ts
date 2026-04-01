@@ -15,6 +15,8 @@ import { CodexEngine } from "../engines/codex.js";
 import { GeminiEngine } from "../engines/gemini.js";
 import { HermesEngine } from "../engines/hermes.js";
 import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
+import { handleWorkflowsRequest } from "../workflows/api.js";
+import { workflowEngine } from "../workflows/engine.js";
 import { ensureFilesDir } from "./files.js";
 import { initStt } from "../stt/stt.js";
 import { startWatchers, stopWatchers, syncSkillSymlinks } from "./watcher.js";
@@ -522,6 +524,10 @@ export async function startGateway(
   startScheduler(cronJobs, sessionManager, config, connectorMap);
   logger.info(`Loaded ${cronJobs.length} cron job(s)`);
 
+  // Initialize workflow engine
+  workflowEngine.setServices({ sessionManager });
+  workflowEngine.loadAll();
+
   // Mutable config reference for hot-reload
   let currentConfig = config;
 
@@ -578,6 +584,16 @@ export async function startGateway(
 
     // API routes
     if (url.startsWith("/api/")) {
+      // Workflow routes
+      if (url.startsWith("/api/workflows")) {
+        handleWorkflowsRequest(req, res).then((handled) => {
+          if (!handled) handleApiRequest(req, res, apiContext);
+        }).catch((err) => {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        });
+        return;
+      }
       handleApiRequest(req, res, apiContext);
       return;
     }
