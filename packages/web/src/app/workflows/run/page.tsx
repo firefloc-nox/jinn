@@ -142,7 +142,9 @@ export default function WorkflowRunPage() {
         const r = runData as unknown as WorkflowRun
         setRun(r)
         // Load workflow definition
-        const wfData = await api.getWorkflow(r.workflowId)
+        const wfId = r.workflowId ?? r.workflow_id
+        if (!wfId) return
+        const wfData = await api.getWorkflow(wfId)
         setDefinition(wfData as unknown as WorkflowDefinition)
         clearStepStates()
       })

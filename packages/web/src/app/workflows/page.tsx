@@ -347,10 +347,10 @@ function LiveTab() {
               Run <code style={{ fontFamily: 'var(--font-mono)' }}>{run.id.slice(0, 8)}…</code>
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              Workflow: {run.workflowId}
+              Workflow: {run.workflowId ?? run.workflow_id}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 2 }}>
-              Started {timeAgo(run.startedAt)}
+              Started {timeAgo(run.startedAt ?? run.started_at)}
             </div>
           </div>
           <RunStatusBadge status={run.status} />
@@ -388,7 +388,7 @@ function HistoryTab() {
             allRuns.push(...wfRuns.filter(r => r.status === 'success' || r.status === 'error' || r.status === 'cancelled'))
           } catch { /* skip */ }
         }
-        allRuns.sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
+        allRuns.sort((a, b) => (b.startedAt ?? b.started_at ?? '').localeCompare(a.startedAt ?? a.started_at ?? ''))
         setRuns(allRuns)
       })
       .catch(() => {})
@@ -430,7 +430,7 @@ function HistoryTab() {
               {run.id.slice(0, 16)}…
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 2 }}>
-              {timeAgo(run.startedAt)} · {run.triggerType ?? 'manual'}
+              {timeAgo(run.startedAt ?? run.started_at)} · {run.triggerType ?? run.trigger_type ?? 'manual'}
             </div>
           </div>
           <RunStatusBadge status={run.status} />
@@ -477,7 +477,7 @@ export default function WorkflowsPage() {
 
   async function handleToggle(wf: WorkflowDefinition) {
     try {
-      await api.toggleWorkflow(wf.id)
+      await api.toggleWorkflow(wf.id, !wf.enabled)
       setWorkflows((prev) => prev.map((w) => w.id === wf.id ? { ...w, enabled: !w.enabled } : w))
     } catch { /* ignore */ }
   }

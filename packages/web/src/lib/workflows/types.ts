@@ -32,12 +32,17 @@ export interface WorkflowDefinition {
 
 export interface WorkflowRun {
   id: string
-  workflowId: string
+  workflowId?: string
+  workflow_id?: string       // snake_case from API
   status: RunStatus
   triggerType?: string
+  trigger_type?: string      // snake_case from API
   currentNodeId?: string
+  current_node_id?: string   // snake_case from API
   startedAt?: string
+  started_at?: string        // snake_case from API
   completedAt?: string
+  completed_at?: string      // snake_case from API
   error?: string
 }
 

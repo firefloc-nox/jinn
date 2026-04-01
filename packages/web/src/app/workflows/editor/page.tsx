@@ -153,7 +153,7 @@ export default function WorkflowEditorPage() {
       const result = await api.triggerWorkflow(id) as Record<string, unknown>
       const runId = result.runId ?? result.id
       if (runId) {
-        router.push(`/workflows/runs/${runId}`)
+        router.push(`/workflows/run?id=${runId}`)
       }
     } catch { /* ignore */ }
   }, [id, router])
@@ -162,7 +162,7 @@ export default function WorkflowEditorPage() {
   const handleToggle = useCallback(async () => {
     if (!id || !definition) return
     try {
-      await api.toggleWorkflow(id)
+      await api.toggleWorkflow(id, !definition.enabled)
       setDefinition({ ...definition, enabled: !definition.enabled })
     } catch { /* ignore */ }
   }, [id, definition, setDefinition])
