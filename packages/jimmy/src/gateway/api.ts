@@ -1561,6 +1561,32 @@ Handle this as a priority request from a colleague.`;
       return json(res, { status: "ok" });
     }
 
+    // PATCH /api/org/departments/:name/board/cards/:cardId
+    {
+      const p = matchRoute("/api/org/departments/:name/board/cards/:cardId", pathname);
+      if (method === "PATCH" && p) {
+        const boardPath = path.join(ORG_DIR, p.name, "board.json");
+        if (!fs.existsSync(boardPath)) return notFound(res);
+        const _parsed = await readJsonBody(req, res);
+        if (!_parsed.ok) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updates = _parsed.body as Record<string, unknown>;
+        const boardData = JSON.parse(fs.readFileSync(boardPath, "utf-8")) as { cards?: Array<{ id: string; status: string; [key: string]: unknown }>; [key: string]: unknown };
+        const cards = boardData.cards;
+        if (!Array.isArray(cards)) return badRequest(res, "Board has no cards array");
+        const cardIdx = cards.findIndex((c) => c.id === p.cardId);
+        if (cardIdx === -1) return notFound(res);
+        const card = cards[cardIdx];
+        const oldStatus = card.status;
+        Object.assign(card, updates);
+        cards[cardIdx] = card;
+        fs.writeFileSync(boardPath, JSON.stringify(boardData, null, 2));
+        const newStatus = card.status;
+        context.emit("board:card_moved", { board: p.name, cardId: p.cardId, from: oldStatus, to: newStatus });
+        return json(res, card);
+      }
+    }
+
     // GET /api/skills/search?q=<query> — search the skills.sh registry
     if (method === "GET" && pathname === "/api/skills/search") {
       const query = url.searchParams.get("q") || "";
