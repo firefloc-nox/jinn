@@ -36,3 +36,4 @@ export const TEMPLATE_MIGRATIONS_DIR = path.join(TEMPLATE_DIR, "migrations");
 export const INSTANCES_REGISTRY = path.join(os.homedir(), ".jinn", "instances.json");
 
 export const WORKFLOWS_DIR = path.join(JINN_HOME, 'workflows', 'definitions');
+export const BOARDS_DIR = path.join(JINN_HOME, 'boards');
