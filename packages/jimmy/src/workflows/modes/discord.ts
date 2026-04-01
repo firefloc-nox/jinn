@@ -78,16 +78,17 @@ const discordMode: ModeDefinition = {
         enabled: false,
         trigger: { type: TriggerType.kanban_card_moved },
         nodes: [
-          { id: 'start', type: NodeType.TRIGGER, config: {} },
+          { id: 'start', type: NodeType.TRIGGER, position: { x: 100, y: 200 }, config: {} },
           {
             id: 'notify',
             type: NodeType.NOTIFY,
+            position: { x: 350, y: 200 },
             config: {
               connector: 'discord',
               message: '📌 **{{trigger.card.id}}** déplacée vers **{{trigger.to}}**',
             },
           },
-          { id: 'end', type: NodeType.DONE, config: {} },
+          { id: 'end', type: NodeType.DONE, position: { x: 600, y: 200 }, config: {} },
         ],
         edges: [
           { from: 'start', to: 'notify' },
@@ -107,18 +108,20 @@ const discordMode: ModeDefinition = {
         enabled: false,
         trigger: { type: TriggerType.manual },
         nodes: [
-          { id: 'start', type: NodeType.TRIGGER, config: {} },
+          { id: 'start', type: NodeType.TRIGGER, position: { x: 100, y: 200 }, config: {} },
           {
             id: 'agent',
             type: NodeType.AGENT,
+            position: { x: 350, y: 200 },
             config: { employee: '', prompt: 'Analyse la situation et répond brièvement.', output_var: 'analysis' },
           },
           {
             id: 'notify',
             type: NodeType.NOTIFY,
+            position: { x: 600, y: 200 },
             config: { connector: 'discord', message: '🤖 **Analyse:** {{analysis}}' },
           },
-          { id: 'end', type: NodeType.DONE, config: {} },
+          { id: 'end', type: NodeType.DONE, position: { x: 850, y: 200 }, config: {} },
         ],
         edges: [
           { from: 'start', to: 'agent' },

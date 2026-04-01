@@ -6,7 +6,7 @@ export type StepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped
 export interface WorkflowNode {
   id: string
   type: NodeType
-  position: { x: number; y: number }
+  position?: { x: number; y: number }
   config: Record<string, unknown>
 }
 

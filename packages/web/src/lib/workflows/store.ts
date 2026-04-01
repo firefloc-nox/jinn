@@ -16,7 +16,7 @@ function defNodeToRF(n: WorkflowNode): Node {
   return {
     id: n.id,
     type: n.type.toLowerCase(),
-    position: n.position,
+    position: n.position ?? { x: 0, y: 0 },
     data: { ...n.config, nodeType: n.type },
   }
 }

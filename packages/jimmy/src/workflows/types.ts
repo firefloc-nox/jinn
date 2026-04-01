@@ -102,6 +102,7 @@ export interface WorkflowNode {
   id: string;
   type: NodeType;
   label?: string;
+  position?: { x: number; y: number };
   config: NodeConfig;
   max_attempts?: number;
   retry_delay_ms?: number;
