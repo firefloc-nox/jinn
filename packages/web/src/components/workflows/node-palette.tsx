@@ -1,7 +1,9 @@
 'use client'
 
-import { Zap, Bot, GitBranch, KanbanSquare, Bell, Clock, Check, X, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Zap, Bot, GitBranch, KanbanSquare, Bell, Clock, Check, X, RefreshCw, Puzzle } from 'lucide-react'
 import type { NodeType } from '@/lib/workflows/types'
+import { api } from '@/lib/api'
 
 interface PaletteItem {
   type: NodeType
@@ -37,11 +39,31 @@ const PALETTE_SECTIONS: Array<{ title: string; items: PaletteItem[] }> = [
   },
 ]
 
-interface NodePaletteProps {
-  onDragStart?: (event: React.DragEvent, type: NodeType) => void
+interface ModeNode {
+  type: string
+  label: string
+  category: string
 }
 
-export function NodePalette({ onDragStart }: NodePaletteProps) {
+interface NodePaletteProps {
+  onDragStart?: (event: React.DragEvent, type: NodeType) => void
+  onModeDragStart?: (event: React.DragEvent, type: string) => void
+}
+
+export function NodePalette({ onDragStart, onModeDragStart }: NodePaletteProps) {
+  const [modeNodes, setModeNodes] = useState<ModeNode[]>([])
+
+  useEffect(() => {
+    api.getNodeTypes()
+      .then((data) => {
+        const resp = data as unknown as { base?: string[]; modes?: ModeNode[] }
+        if (resp && resp.modes && Array.isArray(resp.modes)) {
+          setModeNodes(resp.modes)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   return (
     <div
       style={{
@@ -90,6 +112,44 @@ export function NodePalette({ onDragStart }: NodePaletteProps) {
           })}
         </div>
       ))}
+
+      {modeNodes.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div
+            style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.8,
+              color: 'var(--text-tertiary)', textTransform: 'uppercase', padding: '0 4px 4px',
+            }}
+          >
+            MODES
+          </div>
+          {modeNodes.map((mode) => (
+            <div
+              key={mode.type}
+              draggable
+              onDragStart={onModeDragStart ? (e) => onModeDragStart(e, mode.type) : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 10px', borderRadius: 6,
+                border: '1px solid #6366f133',
+                background: '#6366f111',
+                cursor: 'grab', userSelect: 'none',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = '#6366f122'
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = '#6366f111'
+              }}
+            >
+              <Puzzle size={13} color="#6366f1" />
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                {mode.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

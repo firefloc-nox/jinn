@@ -262,6 +262,47 @@ export const ErrorNode = memo(({ id, data, selected }: NodeProps) => (
 ))
 ErrorNode.displayName = 'ErrorNode'
 
+// ─── Generic Mode Node ───────────────────────────────────────────────────────
+
+export const ModeNode = memo(({ id, data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const modeType = String(d.nodeType ?? d.modeType ?? 'mode')
+  const color = '#6366f1'
+  return (
+    <div
+      style={{
+        position: 'relative',
+        minWidth: 160,
+        borderRadius: 8,
+        border: `2px solid ${selected ? color : 'var(--separator)'}`,
+        background: 'var(--bg)',
+        boxShadow: selected ? `0 0 0 2px ${color}33` : 'var(--shadow-overlay)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          background: color,
+          padding: '6px 10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+          {modeType}
+        </span>
+      </div>
+      <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-secondary)', minHeight: 32 }}>
+        Mode node
+      </div>
+      <Handle type="target" position={Position.Top} style={{ background: color, border: '2px solid var(--bg)' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: color, border: '2px solid var(--bg)' }} />
+    </div>
+  )
+})
+ModeNode.displayName = 'ModeNode'
+
 // ─── nodeTypes map for ReactFlow ─────────────────────────────────────────────
 
 export const workflowNodeTypes = {
