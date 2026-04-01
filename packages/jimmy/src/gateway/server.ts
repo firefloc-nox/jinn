@@ -16,6 +16,7 @@ import { GeminiEngine } from "../engines/gemini.js";
 import { HermesEngine } from "../engines/hermes.js";
 import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
 import { handleWorkflowsRequest } from "../workflows/api.js";
+import { handleBoardsRequest } from "../boards/api.js";
 import { workflowEngine } from "../workflows/engine.js";
 import "../workflows/modes/discord.js";
 import "../workflows/modes/templates.js";
@@ -588,6 +589,16 @@ export async function startGateway(
 
     // API routes
     if (url.startsWith("/api/")) {
+      // Board routes
+      if (url.startsWith("/api/boards")) {
+        handleBoardsRequest(req, res, apiContext).then((handled) => {
+          if (!handled) handleApiRequest(req, res, apiContext);
+        }).catch((err) => {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+        });
+        return;
+      }
       // Workflow routes
       if (url.startsWith("/api/workflows")) {
         handleWorkflowsRequest(req, res, currentConfig as unknown as Record<string, unknown>).then((handled) => {
