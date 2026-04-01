@@ -2,6 +2,7 @@ import type { IncomingMessage as HttpRequest, ServerResponse } from 'node:http';
 import { workflowEngine } from './engine.js';
 import type { WorkflowDefinition, TriggerPayload } from './types.js';
 import { nodeRegistry } from './registry.js';
+import { NodeType } from './types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,7 @@ function matchRoute(
 export async function handleWorkflowsRequest(
   req: HttpRequest,
   res: ServerResponse,
+  config?: Record<string, unknown>,
 ): Promise<boolean> {
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
@@ -78,7 +80,17 @@ export async function handleWorkflowsRequest(
   try {
     // GET /api/workflows/node-types
     if (method === 'GET' && pathname === '/api/workflows/node-types') {
-      return json(res, nodeRegistry.listTypes()), true;
+      const { modeRegistry } = await import('./modes/registry.js')
+      const modeNodes = modeRegistry.getAvailableNodes(config ?? {})
+      const baseTypes = Object.values(NodeType)
+      return json(res, { base: baseTypes, modes: modeNodes, legacy: nodeRegistry.listTypes() }), true;
+    }
+
+    // GET /api/workflows/templates
+    if (method === 'GET' && pathname === '/api/workflows/templates') {
+      const { modeRegistry } = await import('./modes/registry.js')
+      const templates = modeRegistry.getTemplates()
+      return json(res, templates), true;
     }
 
     // GET /api/workflows/runs/:runId/stream  (SSE)
