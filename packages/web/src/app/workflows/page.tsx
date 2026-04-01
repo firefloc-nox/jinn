@@ -340,7 +340,7 @@ function LiveTab() {
             borderRadius: 10, padding: '12px 16px',
             display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
           }}
-          onClick={() => router.push(`/workflows/runs/${run.id}`)}
+          onClick={() => router.push(`/workflows/run?id=${run.id}`)}
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 2 }}>
@@ -423,7 +423,7 @@ function HistoryTab() {
             borderRadius: 10, padding: '10px 16px',
             display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
           }}
-          onClick={() => router.push(`/workflows/runs/${run.id}`)}
+          onClick={() => router.push(`/workflows/run?id=${run.id}`)}
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
@@ -470,7 +470,7 @@ export default function WorkflowsPage() {
       const runId = result.runId ?? result.id
       if (runId) {
         pushFromEvent('workflow_triggered', { runId, name: wf.name })
-        router.push(`/workflows/runs/${runId}`)
+        router.push(`/workflows/run?id=${runId}`)
       }
     } catch { /* ignore */ }
   }
@@ -550,7 +550,7 @@ export default function WorkflowsPage() {
                       <WorkflowCard
                         key={wf.id}
                         workflow={wf}
-                        onEdit={() => router.push(`/workflows/${wf.id}`)}
+                        onEdit={() => router.push(`/workflows/editor?id=${wf.id}`)}
                         onRun={() => handleRun(wf)}
                         onToggle={() => handleToggle(wf)}
                       />
@@ -577,7 +577,7 @@ export default function WorkflowsPage() {
           onCreate={(def) => {
             setShowModal(false)
             setWorkflows((prev) => [def, ...prev])
-            router.push(`/workflows/${def.id}`)
+            router.push(`/workflows/editor?id=${def.id}`)
           }}
         />
       )}
