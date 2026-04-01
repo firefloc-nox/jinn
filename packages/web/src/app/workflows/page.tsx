@@ -8,7 +8,7 @@ import { api } from '@/lib/api'
 import { useBreadcrumbs } from '@/context/breadcrumb-context'
 import { useNotifications } from '@/hooks/use-notifications'
 import type { WorkflowDefinition, WorkflowRun, TriggerType } from '@/lib/workflows/types'
-import { Play, Pencil, Plus, X, CheckCircle, Clock } from 'lucide-react'
+import { Play, Pencil, Plus, X, CheckCircle, Clock, LayoutTemplate } from 'lucide-react'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -181,6 +181,120 @@ function NewWorkflowModal({ onClose, onCreate }: NewWorkflowModalProps) {
           >
             {loading ? 'Creating…' : 'Create'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Templates Modal ─────────────────────────────────────────────────────────
+
+interface WorkflowTemplate {
+  id?: string
+  name: string
+  description?: string
+  icon?: string
+  definition: Record<string, unknown>
+}
+
+interface TemplatesModalProps {
+  onClose: () => void
+  onSelect: (templateDef: Record<string, unknown>) => void
+}
+
+function TemplatesModal({ onClose, onSelect }: TemplatesModalProps) {
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selecting, setSelecting] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.getWorkflowTemplates()
+      .then((data) => setTemplates(data as WorkflowTemplate[]))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--separator)',
+          borderRadius: 12,
+          padding: 24,
+          width: 640,
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+            Workflow Templates
+          </h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {loading ? (
+            <div style={{ color: 'var(--text-secondary)', padding: 24, textAlign: 'center' }}>Loading templates…</div>
+          ) : templates.length === 0 ? (
+            <div style={{ color: 'var(--text-secondary)', padding: 24, textAlign: 'center' }}>No templates available</div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              {templates.map((tpl, i) => (
+                <button
+                  key={tpl.id ?? i}
+                  disabled={!!selecting}
+                  onClick={async () => {
+                    setSelecting(tpl.id ?? String(i))
+                    try {
+                      await onSelect(tpl.definition)
+                    } finally {
+                      setSelecting(null)
+                    }
+                  }}
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+                    padding: '16px', borderRadius: 8,
+                    border: '1px solid var(--separator)',
+                    background: 'var(--material-regular)',
+                    cursor: selecting ? 'wait' : 'pointer',
+                    textAlign: 'left',
+                    opacity: selecting && selecting !== (tpl.id ?? String(i)) ? 0.5 : 1,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!selecting) (e.currentTarget as HTMLButtonElement).style.background = 'var(--fill-secondary)'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--material-regular)'
+                  }}
+                >
+                  <div style={{ fontSize: 24 }}>{tpl.icon ?? '⚙️'}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
+                    {tpl.name}
+                  </div>
+                  {tpl.description && (
+                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                      {tpl.description}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -454,6 +568,7 @@ export default function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false)
 
   const refresh = useCallback(() => {
     api.listWorkflows()
@@ -500,17 +615,31 @@ export default function WorkflowsPage() {
               </p>
             )}
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: 'var(--accent)', color: '#fff', border: 'none',
-              borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            <Plus size={15} />
-            New Workflow
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => setShowTemplatesModal(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'transparent', color: 'var(--text-primary)',
+                border: '1px solid var(--separator)',
+                borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <LayoutTemplate size={15} />
+              Templates
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'var(--accent)', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <Plus size={15} />
+              New Workflow
+            </button>
+          </div>
         </header>
 
         {/* Tabs */}
@@ -578,6 +707,20 @@ export default function WorkflowsPage() {
             setShowModal(false)
             setWorkflows((prev) => [def, ...prev])
             router.push(`/workflows/editor?id=${def.id}`)
+          }}
+        />
+      )}
+
+      {showTemplatesModal && (
+        <TemplatesModal
+          onClose={() => setShowTemplatesModal(false)}
+          onSelect={async (templateDef) => {
+            try {
+              const def = await api.createWorkflow(templateDef) as unknown as WorkflowDefinition
+              setShowTemplatesModal(false)
+              setWorkflows((prev) => [def, ...prev])
+              router.push(`/workflows/editor?id=${def.id}`)
+            } catch { /* ignore */ }
           }}
         />
       )}

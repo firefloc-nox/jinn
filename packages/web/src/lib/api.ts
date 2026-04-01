@@ -363,6 +363,7 @@ export const api = {
   approveRun: (runId: string, data?: unknown) => post<Record<string, unknown>>(`/api/workflows/runs/${runId}/approve`, data ?? {}),
   cancelRun: (runId: string) => del<Record<string, unknown>>(`/api/workflows/runs/${runId}`),
   getNodeTypes: () => get<Record<string, unknown>[]>('/api/workflows/node-types'),
+  getWorkflowTemplates: () => get<unknown[]>('/api/workflows/templates'),
 
   patchCard: (dept: string, cardId: string, fields: Record<string, unknown>) =>
     patch<Record<string, unknown>>(`/api/org/departments/${dept}/board/cards/${cardId}`, fields),
