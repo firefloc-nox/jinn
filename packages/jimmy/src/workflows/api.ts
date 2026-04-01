@@ -178,11 +178,12 @@ export async function handleWorkflowsRequest(
       if (!parsed.ok) return true;
 
       const body = parsed.body as Partial<WorkflowDefinition>;
-      if (!body.id) return badRequest(res, 'id is required'), true;
       if (!body.name) return badRequest(res, 'name is required'), true;
 
+      const id = body.id || body.name!.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now().toString(36);
+
       const def: WorkflowDefinition = {
-        id: body.id,
+        id,
         name: body.name,
         description: body.description,
         version: body.version ?? 1,
