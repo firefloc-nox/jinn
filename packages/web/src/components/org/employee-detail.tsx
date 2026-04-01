@@ -126,6 +126,14 @@ export function EmployeeDetail({
   // Hermes profile modal
   const [showProfileEditor, setShowProfileEditor] = useState(false);
 
+  // Cross-request state
+  const [crossRequestService, setCrossRequestService] = useState<string | null>(null);
+  const [crossRequestFrom, setCrossRequestFrom] = useState<string>('');
+  const [crossRequestPrompt, setCrossRequestPrompt] = useState<string>('');
+  const [crossRequestLoading, setCrossRequestLoading] = useState(false);
+  const [crossRequestResult, setCrossRequestResult] = useState<string | null>(null);
+  const [crossRequestError, setCrossRequestError] = useState<string | null>(null);
+
   useEffect(() => {
     setPersonaExpanded(false);
     setEditing(false);
@@ -182,6 +190,27 @@ export function EmployeeDetail({
     setEditing(false);
     setEditState(null);
     setSaveError(null);
+  }
+
+  async function handleCrossRequest(serviceName: string) {
+    if (!crossRequestFrom || !crossRequestPrompt.trim()) return;
+    setCrossRequestLoading(true);
+    setCrossRequestResult(null);
+    setCrossRequestError(null);
+    try {
+      const res = await api.crossRequest({
+        fromEmployee: crossRequestFrom,
+        service: serviceName,
+        prompt: crossRequestPrompt.trim(),
+      });
+      const sessionId = (res as Record<string, unknown>).sessionId as string | undefined;
+      setCrossRequestResult(sessionId ? `Session started: ${sessionId}` : 'Request submitted successfully');
+      setCrossRequestPrompt('');
+    } catch (err) {
+      setCrossRequestError(err instanceof Error ? err.message : 'Request failed');
+    } finally {
+      setCrossRequestLoading(false);
+    }
   }
 
   async function saveEdit() {
@@ -399,6 +428,10 @@ export function EmployeeDetail({
         </div>
 
         {/* Engine row */}
+        {/* NOTE (needs backend fix): The COO is a synthetic employee built in jimmy's api.ts and not loaded from YAML.
+            The GET /api/org/employees/:name route may not return hermesProfile for the COO, causing the EngineChip
+            and hermesProfile section below to remain empty. Fix: ensure the synthetic COO object in jimmy includes
+            hermesProfile before it is returned by the individual employee endpoint. */}
         <div className="mt-[var(--space-4)] grid grid-cols-2 gap-[var(--space-4)]">
           <div>
             <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
@@ -544,6 +577,118 @@ export function EmployeeDetail({
           </div>
         )}
       </div>
+
+      {/* Services (provides) */}
+      {employee.provides && employee.provides.length > 0 && (
+        <div>
+          <h3 className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] tracking-[var(--tracking-wide)] uppercase text-[var(--text-tertiary)] mb-[var(--space-3)]">
+            Services
+          </h3>
+          <div className="rounded-[var(--radius-lg,16px)] border border-[var(--separator)] bg-[var(--material-regular)] overflow-hidden">
+            {employee.provides.map((svc, idx) => (
+              <div
+                key={svc.name}
+                className={`px-[var(--space-5)] py-[var(--space-4)]${idx > 0 ? ' border-t border-[var(--separator)]' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-[var(--space-3)]">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[length:var(--text-body)] font-[var(--weight-semibold)] text-[var(--text-primary)] m-0">
+                      {svc.name}
+                    </p>
+                    {svc.description && (
+                      <p className="text-[length:var(--text-caption1)] text-[var(--text-secondary)] mt-[2px] m-0">
+                        {svc.description}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (crossRequestService === svc.name) {
+                        setCrossRequestService(null);
+                        setCrossRequestResult(null);
+                        setCrossRequestError(null);
+                      } else {
+                        setCrossRequestService(svc.name);
+                        setCrossRequestResult(null);
+                        setCrossRequestError(null);
+                        if (!crossRequestFrom && allEmployees && allEmployees.length > 0) {
+                          setCrossRequestFrom(allEmployees.find(e => e.name !== employee.name)?.name ?? '');
+                        }
+                      }
+                    }}
+                    className="shrink-0 px-[var(--space-3)] py-[4px] rounded-[var(--radius-sm,6px)] bg-[var(--accent)] text-[var(--accent-contrast,white)] border-none cursor-pointer text-[length:var(--text-caption1)] font-[var(--weight-semibold)]"
+                  >
+                    Request
+                  </button>
+                </div>
+
+                {/* Inline request form */}
+                {crossRequestService === svc.name && (
+                  <div className="mt-[var(--space-3)] pt-[var(--space-3)] border-t border-[var(--separator)] flex flex-col gap-[var(--space-2)]">
+                    <div>
+                      <label className="block text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
+                        From Employee
+                      </label>
+                      {allEmployees && allEmployees.filter(e => e.name !== employee.name).length > 0 ? (
+                        <select
+                          className="text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[4px] w-full"
+                          value={crossRequestFrom}
+                          onChange={e => setCrossRequestFrom(e.target.value)}
+                        >
+                          <option value="">— select employee —</option>
+                          {allEmployees.filter(e => e.name !== employee.name).map(e => (
+                            <option key={e.name} value={e.name}>{e.displayName || e.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[4px] w-full"
+                          placeholder="Employee name"
+                          value={crossRequestFrom}
+                          onChange={e => setCrossRequestFrom(e.target.value)}
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
+                        Prompt
+                      </label>
+                      <textarea
+                        className="w-full text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[var(--space-2)] resize-y"
+                        rows={3}
+                        placeholder="Describe what you need..."
+                        value={crossRequestPrompt}
+                        onChange={e => setCrossRequestPrompt(e.target.value)}
+                      />
+                    </div>
+                    {crossRequestError && (
+                      <p className="text-[length:var(--text-caption1)] text-[var(--system-red)] m-0">{crossRequestError}</p>
+                    )}
+                    {crossRequestResult && (
+                      <p className="text-[length:var(--text-caption1)] text-[var(--system-green)] m-0">{crossRequestResult}</p>
+                    )}
+                    <div className="flex gap-[var(--space-2)] justify-end">
+                      <button
+                        onClick={() => { setCrossRequestService(null); setCrossRequestResult(null); setCrossRequestError(null); }}
+                        className="px-[var(--space-3)] py-[4px] rounded-[var(--radius-sm,6px)] bg-[var(--fill-tertiary)] text-[var(--text-secondary)] border-none cursor-pointer text-[length:var(--text-caption1)]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleCrossRequest(svc.name)}
+                        disabled={crossRequestLoading || !crossRequestFrom || !crossRequestPrompt.trim()}
+                        className="px-[var(--space-3)] py-[4px] rounded-[var(--radius-sm,6px)] bg-[var(--accent)] text-[var(--accent-contrast,white)] border-none cursor-pointer text-[length:var(--text-caption1)] font-[var(--weight-semibold)] disabled:opacity-50"
+                      >
+                        {crossRequestLoading ? 'Sending...' : 'Submit'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Sessions */}
       <div>
