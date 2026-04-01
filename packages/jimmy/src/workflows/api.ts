@@ -237,18 +237,13 @@ export async function handleWorkflowsRequest(
       }
     }
 
-    // PATCH /api/workflows/:id/toggle
+    // PATCH /api/workflows/:id/toggle — toggle enabled sans body requis
     params = matchRoute('/api/workflows/:id/toggle', pathname);
     if (method === 'PATCH' && params) {
-      const parsed = await readJsonBody(req, res);
-      if (!parsed.ok) return true;
-
-      const body = parsed.body as Record<string, unknown>;
-      const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined;
-      if (enabled === undefined) return badRequest(res, 'enabled (boolean) is required'), true;
-
+      const existing = workflowEngine.getWorkflow(params.id);
+      if (!existing) return notFound(res), true;
       try {
-        const def = workflowEngine.toggleWorkflow(params.id, enabled);
+        const def = workflowEngine.toggleWorkflow(params.id, !existing.enabled);
         return json(res, def), true;
       } catch (err) {
         return notFound(res), true;

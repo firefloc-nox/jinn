@@ -1541,7 +1541,7 @@ Handle this as a priority request from a colleague.`;
     params = matchRoute("/api/org/departments/:name/board", pathname);
     if (method === "GET" && params) {
       const boardPath = path.join(ORG_DIR, params.name, "board.json");
-      if (!fs.existsSync(boardPath)) return notFound(res);
+      if (!fs.existsSync(boardPath)) return json(res, []);
       const board = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
       return json(res, board);
     }
