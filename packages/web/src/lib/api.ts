@@ -349,6 +349,21 @@ export const api = {
     get<TranscriptEntry[]>(`/api/sessions/${id}/transcript`),
   crossRequest: (body: { fromEmployee: string; service: string; prompt: string; parentSessionId?: string }) =>
     post<Record<string, unknown>>('/api/org/cross-request', body),
+  // ── Workflow API ──────────────────────────────────────────────────────────
+  listWorkflows: () => get<Record<string, unknown>[]>('/api/workflows'),
+  getWorkflow: (id: string) => get<Record<string, unknown>>(`/api/workflows/${id}`),
+  createWorkflow: (def: Record<string, unknown>) => post<Record<string, unknown>>('/api/workflows', def),
+  updateWorkflow: (id: string, def: Record<string, unknown>) => put<Record<string, unknown>>(`/api/workflows/${id}`, def),
+  toggleWorkflow: (id: string) => patch<Record<string, unknown>>(`/api/workflows/${id}/toggle`, {}),
+  deleteWorkflow: (id: string) => del<Record<string, unknown>>(`/api/workflows/${id}`),
+  triggerWorkflow: (id: string, inputs?: Record<string, unknown>) => post<Record<string, unknown>>(`/api/workflows/${id}/trigger`, inputs ?? {}),
+  getWorkflowRuns: (id: string) => get<Record<string, unknown>[]>(`/api/workflows/${id}/runs`),
+  getRun: (runId: string) => get<Record<string, unknown>>(`/api/workflows/runs/${runId}`),
+  getRunSteps: (runId: string) => get<Record<string, unknown>[]>(`/api/workflows/runs/${runId}/steps`),
+  approveRun: (runId: string, data?: unknown) => post<Record<string, unknown>>(`/api/workflows/runs/${runId}/approve`, data ?? {}),
+  cancelRun: (runId: string) => del<Record<string, unknown>>(`/api/workflows/runs/${runId}`),
+  getNodeTypes: () => get<Record<string, unknown>[]>('/api/workflows/node-types'),
+
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)
