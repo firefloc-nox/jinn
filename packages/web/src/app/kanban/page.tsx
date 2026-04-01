@@ -287,13 +287,24 @@ export default function KanbanPage() {
     })
   }
 
-  function handleMoveTicket(ticketId: string, status: TicketStatus) {
-    setTickets((prev) => {
-      const next = moveTicket(prev, ticketId, status)
-      persistToApi(next)
-      return next
-    })
-  }
+  const handleMoveTicket = useCallback(async (ticketId: string, status: TicketStatus) => {
+    const ticket = tickets[ticketId]
+    if (!ticket) return
+    const updated = moveTicket(tickets, ticketId, status)
+    setTickets(updated)
+    saveTickets(updated)
+
+    // Try atomic PATCH first (new API)
+    if (ticket.department) {
+      try {
+        await api.patchCard(ticket.department, ticketId, { status })
+        return  // success — no need for full sync
+      } catch {
+        // fallback to full sync
+      }
+    }
+    persistToApi(updated)
+  }, [tickets, persistToApi])
 
   function handleDeleteTicket(ticketId: string) {
     setTickets((prev) => {

@@ -364,6 +364,9 @@ export const api = {
   cancelRun: (runId: string) => del<Record<string, unknown>>(`/api/workflows/runs/${runId}`),
   getNodeTypes: () => get<Record<string, unknown>[]>('/api/workflows/node-types'),
 
+  patchCard: (dept: string, cardId: string, fields: Record<string, unknown>) =>
+    patch<Record<string, unknown>>(`/api/org/departments/${dept}/board/cards/${cardId}`, fields),
+
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)
