@@ -12,10 +12,13 @@ import {
   TriggerType,
 } from './types.js';
 import type { NodeServices } from './registry.js';
+import { registerAllCronTriggers, registerCronTrigger, unregisterCronTrigger } from './triggers/cron.js';
+import { registerKanbanTriggers, type GatewayEventBus } from './triggers/kanban.js';
 
 export class WorkflowEngine {
   private runner: WorkflowRunner;
   private definitions = new Map<string, WorkflowDefinition>();
+  private eventBus: GatewayEventBus | null = null;
 
   constructor() {
     this.runner = new WorkflowRunner();
@@ -27,6 +30,11 @@ export class WorkflowEngine {
 
   setServices(services: NodeServices): void {
     this.runner.setServices(services);
+  }
+
+  setContext(bus: GatewayEventBus): void {
+    this.eventBus = bus;
+    registerKanbanTriggers(bus);
   }
 
   getRunner(): WorkflowRunner {
@@ -60,6 +68,7 @@ export class WorkflowEngine {
 
     // Register cron triggers for enabled workflows
     this._registerCronTriggers();
+    registerAllCronTriggers(Array.from(this.definitions.values()));
   }
 
   reload(id: string): void {
@@ -120,6 +129,9 @@ export class WorkflowEngine {
     fs.writeFileSync(filePath, content, 'utf-8');
     this.definitions.set(def.id, def);
     logger.info(`[workflow:engine] Saved workflow "${def.id}"`);
+    // Register/update cron trigger when workflow changes
+    registerCronTrigger(def);
+    if (!def.enabled) unregisterCronTrigger(def.id);
   }
 
   deleteWorkflow(id: string): void {
@@ -136,6 +148,7 @@ export class WorkflowEngine {
     }
     if (!deleted) throw new Error(`Workflow "${id}" not found on disk`);
     this.definitions.delete(id);
+    unregisterCronTrigger(id);
     logger.info(`[workflow:engine] Deleted workflow "${id}"`);
   }
 
