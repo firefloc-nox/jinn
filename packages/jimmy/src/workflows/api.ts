@@ -2,6 +2,7 @@ import type { IncomingMessage as HttpRequest, ServerResponse } from 'node:http';
 import { workflowEngine } from './engine.js';
 import type { WorkflowDefinition, TriggerPayload } from './types.js';
 import { nodeRegistry } from './registry.js';
+import { handleWebhookTrigger } from './triggers/webhook.js';
 import { NodeType } from './types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -267,6 +268,21 @@ export async function handleWorkflowsRequest(
     if (method === 'GET' && params) {
       const runs = workflowEngine.getRunsByWorkflow(params.id);
       return json(res, runs), true;
+    }
+
+    // POST /api/workflows/webhook/:workflowId — external webhook trigger
+    params = matchRoute('/api/workflows/webhook/:workflowId', pathname);
+    if (method === 'POST' && params) {
+      const rawBody = await readBody(req);
+      const signature = req.headers['x-hub-signature-256'] as string | undefined
+        ?? req.headers['x-signature'] as string | undefined;
+      let body: unknown = {};
+      try { body = rawBody.trim() ? JSON.parse(rawBody) : {}; } catch { body = rawBody; }
+      const result = await handleWebhookTrigger(params.workflowId, body, signature);
+      if ('error' in result) {
+        return json(res, result, 400), true;
+      }
+      return json(res, result, 202), true;
     }
 
     // POST /api/workflows/:id/trigger
