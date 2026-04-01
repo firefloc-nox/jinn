@@ -39,6 +39,7 @@ export interface Employee {
   fallbackEngine?: string;
   mcp?: boolean;
   honcho?: boolean;
+  provides?: Array<{ name: string; description?: string }>;
 }
 
 export interface CreateEmployeeRequest {
@@ -346,6 +347,8 @@ export const api = {
     post<{ status: string }>(`/api/sessions/${sessionId}/queue/resume`, {}),
   getSessionTranscript: (id: string) =>
     get<TranscriptEntry[]>(`/api/sessions/${id}/transcript`),
+  crossRequest: (body: { fromEmployee: string; service: string; prompt: string; parentSessionId?: string }) =>
+    post<Record<string, unknown>>('/api/org/cross-request', body),
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)
