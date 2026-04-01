@@ -51,13 +51,28 @@ export const waitHandler: NodeHandler = {
     }
 
     if (mode === 'human_approval') {
+      const timeout_ms = (config as WaitNodeConfig & { timeout_ms?: number }).timeout_ms;
+      const resumeAfter = timeout_ms ? new Date(Date.now() + timeout_ms).toISOString() : undefined;
+
       const suspend: SuspendInfo = {
         reason: 'human_approval',
         node_id: node.id,
         message: approval_message ?? 'Waiting for human approval',
+        resume_after: resumeAfter,
       };
 
-      logger.info(`[workflow:wait] Suspending run ${context.run_id} for human approval`);
+      logger.info(`[workflow:wait] Suspending run ${context.run_id} for human approval${timeout_ms ? ` (timeout: ${timeout_ms}ms)` : ''}`);
+
+      // Schedule auto-reject if timeout_ms is defined
+      if (timeout_ms && services.resumeRun) {
+        const runId = context.run_id;
+        const resumeFn = services.resumeRun;
+        setTimeout(() => {
+          resumeFn(runId, { resumed_by: 'timeout', approved: false, node_id: node.id }).catch((err) => {
+            logger.error(`[workflow:wait] Auto-reject failed for run ${runId}: ${err instanceof Error ? err.message : err}`);
+          });
+        }, timeout_ms);
+      }
 
       return {
         output: { mode: 'human_approval', suspended: true },
