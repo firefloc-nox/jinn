@@ -225,8 +225,17 @@ function CronForm({ config, onChange }: { config: Record<string, unknown>; onCha
   )
 }
 
-function TriggerForm({ config, onChange }: { config: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
+function TriggerForm({ config, onChange, workflowId }: { config: Record<string, unknown>; onChange: (k: string, v: unknown) => void; workflowId?: string }) {
   const type = String(config.triggerType ?? 'manual')
+
+  let cronPreview = ''
+  if (type === 'cron') {
+    const schedule = String(config.schedule ?? '')
+    try { cronPreview = schedule ? describeCron(schedule) : '' } catch { /* invalid */ }
+  }
+
+  const webhookUrl = workflowId ? `/api/workflows/webhook/${workflowId}` : ''
+
   return (
     <>
       <Field label="Trigger Type">
@@ -242,6 +251,7 @@ function TriggerForm({ config, onChange }: { config: Record<string, unknown>; on
           <option value="kanban_card_moved">Kanban Card Moved</option>
         </select>
       </Field>
+
       {type === 'cron' && (
         <Field label="Schedule">
           <input
@@ -250,25 +260,43 @@ function TriggerForm({ config, onChange }: { config: Record<string, unknown>; on
             style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
             placeholder="0 9 * * 1-5"
           />
+          {cronPreview && (
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+              Prochain run : {cronPreview}
+            </span>
+          )}
         </Field>
       )}
+
       {type === 'webhook' && (
-        <Field label="Webhook Path">
+        <Field label="Webhook URL">
           <input
-            value={String(config.path ?? '')}
-            onChange={(e) => onChange('path', e.target.value)}
-            style={inputStyle}
-            placeholder="/webhook/my-trigger"
+            value={webhookUrl}
+            readOnly
+            style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', cursor: 'text' }}
+            onClick={(e) => (e.target as HTMLInputElement).select()}
           />
         </Field>
       )}
+
       {(type === 'kanban_card_added' || type === 'kanban_card_moved') && (
-        <Field label="Board Filter">
+        <Field label="Board">
           <input
             value={String(config.board ?? '')}
             onChange={(e) => onChange('board', e.target.value)}
             style={inputStyle}
             placeholder="optional board id"
+          />
+        </Field>
+      )}
+
+      {type === 'kanban_card_moved' && (
+        <Field label="To Column">
+          <input
+            value={String(config.to_column ?? '')}
+            onChange={(e) => onChange('to_column', e.target.value)}
+            style={inputStyle}
+            placeholder="e.g. done"
           />
         </Field>
       )}
@@ -279,11 +307,12 @@ function TriggerForm({ config, onChange }: { config: Record<string, unknown>; on
 // ─── Properties Panel ────────────────────────────────────────────────────────
 
 export function PropertiesPanel() {
-  const { selectedNodeId, nodes, updateNodeConfig, setSelectedNodeId } = useWorkflowStore()
+  const { selectedNodeId, nodes, definition, updateNodeConfig, setSelectedNodeId } = useWorkflowStore()
 
   const selectedNode = nodes.find((n: Node) => n.id === selectedNodeId)
   const nodeType = selectedNode ? (String((selectedNode.data as Record<string, unknown>).nodeType ?? '').toUpperCase() as NodeType) : null
   const config = (selectedNode?.data ?? {}) as Record<string, unknown>
+  const workflowId = definition?.id
 
   function handleChange(key: string, value: unknown) {
     if (!selectedNodeId) return
@@ -338,7 +367,7 @@ export function PropertiesPanel() {
             {nodeType === 'MOVE_CARD' && <MoveCardForm config={config} onChange={handleChange} />}
             {nodeType === 'WAIT' && <WaitForm config={config} onChange={handleChange} />}
             {nodeType === 'CRON' && <CronForm config={config} onChange={handleChange} />}
-            {nodeType === 'TRIGGER' && <TriggerForm config={config} onChange={handleChange} />}
+            {nodeType === 'TRIGGER' && <TriggerForm config={config} onChange={handleChange} workflowId={workflowId} />}
             {(nodeType === 'DONE' || nodeType === 'ERROR') && (
               <Field label="Message">
                 <input
