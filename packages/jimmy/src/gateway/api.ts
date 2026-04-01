@@ -58,6 +58,7 @@ import {
   HERMES_CRON_FILE,
 } from "../cron/hermes-jobs.js";
 import QRCode from "qrcode";
+import { gatewayEventBus } from "./event-bus.js";
 import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
@@ -1445,6 +1446,14 @@ export async function handleApiRequest(
       const updatedRegistry = scanOrg();
       const created = updatedRegistry.get(safeName);
       context.emit("org:updated", { employee: safeName });
+      // Emit board:card_added if employee was assigned to a department (added as a board card)
+      if (typeof body.department === "string" && body.department) {
+        gatewayEventBus.emit("board:card_added", {
+          board: body.department,
+          cardId: safeName,
+          title: (typeof body.displayName === "string" && body.displayName) ? body.displayName : safeName,
+        });
+      }
       return json(res, created ?? { name: safeName }, 201);
     }
 
@@ -1556,8 +1565,24 @@ Handle this as a priority request from a colleague.`;
       if (!_parsed.ok) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const body = _parsed.body as any;
+      // Detect new cards to emit board:card_added events
+      const oldCards: Array<{ id: string; title?: string }> = [];
+      if (fs.existsSync(boardPath)) {
+        try {
+          const oldBoard = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
+          if (Array.isArray(oldBoard?.cards)) oldCards.push(...oldBoard.cards);
+        } catch { /* ignore */ }
+      }
+      const oldCardIds = new Set(oldCards.map((c) => c.id));
       fs.writeFileSync(boardPath, JSON.stringify(body, null, 2));
       context.emit("board:updated", { department: p.name });
+      // Emit board:card_added for any new cards
+      const newCards: Array<{ id: string; title?: string }> = Array.isArray(body?.cards) ? body.cards : [];
+      for (const card of newCards) {
+        if (card.id && !oldCardIds.has(card.id)) {
+          gatewayEventBus.emit("board:card_added", { board: p.name, cardId: card.id, title: card.title ?? card.id });
+        }
+      }
       return json(res, { status: "ok" });
     }
 
@@ -1583,6 +1608,7 @@ Handle this as a priority request from a colleague.`;
         fs.writeFileSync(boardPath, JSON.stringify(boardData, null, 2));
         const newStatus = card.status;
         context.emit("board:card_moved", { board: p.name, cardId: p.cardId, from: oldStatus, to: newStatus });
+        gatewayEventBus.emit("board:card_moved", { board: p.name, cardId: p.cardId, from: oldStatus, to: newStatus });
         return json(res, card);
       }
     }
