@@ -17,6 +17,8 @@ import { HermesEngine } from "../engines/hermes.js";
 import { handleApiRequest, resumePendingWebQueueItems, type ApiContext } from "./api.js";
 import { handleWorkflowsRequest } from "../workflows/api.js";
 import { workflowEngine } from "../workflows/engine.js";
+import "../workflows/modes/discord.js";
+import "../workflows/modes/templates.js";
 import { ensureFilesDir } from "./files.js";
 import { initStt } from "../stt/stt.js";
 import { startWatchers, stopWatchers, syncSkillSymlinks } from "./watcher.js";
@@ -586,7 +588,7 @@ export async function startGateway(
     if (url.startsWith("/api/")) {
       // Workflow routes
       if (url.startsWith("/api/workflows")) {
-        handleWorkflowsRequest(req, res).then((handled) => {
+        handleWorkflowsRequest(req, res, currentConfig as unknown as Record<string, unknown>).then((handled) => {
           if (!handled) handleApiRequest(req, res, apiContext);
         }).catch((err) => {
           res.writeHead(500, { "Content-Type": "application/json" });
