@@ -389,7 +389,8 @@ export async function handleWorkflowsRequest(
         let reply = '';
         const stream = await client.chatStream(hermesSession.id, fullMessage);
         for await (const event of stream) {
-          if (event.event === 'run.delta' && event.data.delta) {
+          // Hermes WebAPI emits 'assistant.delta' (not 'run.delta')
+          if ((event.event === 'assistant.delta' || event.event === 'run.delta') && event.data.delta) {
             reply += event.data.delta;
           }
         }
