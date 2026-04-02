@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ReactFlow, Background, BackgroundVariant, MiniMap, Controls,
 } from '@xyflow/react'
@@ -119,7 +119,8 @@ function StepLogsPanel({ steps }: { steps: WorkflowStep[] }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function WorkflowRunPage() {
-  const runId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('id') ?? '' : ''
+  const searchParams = useSearchParams()
+  const runId = searchParams.get('id') ?? ''
   const router = useRouter()
   const [run, setRun] = useState<WorkflowRun | null>(null)
   const [steps, setSteps] = useState<WorkflowStep[]>([])

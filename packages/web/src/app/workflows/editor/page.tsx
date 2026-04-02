@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ReactFlow, Background, MiniMap, Controls, BackgroundVariant,
   type ReactFlowInstance,
@@ -118,7 +118,8 @@ function Toolbar({ workflow, isDirty, onSave, onTestRun, onToggle }: ToolbarProp
 // ─── Editor Page ─────────────────────────────────────────────────────────────
 
 export default function WorkflowEditorPage() {
-  const id = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('id') ?? '' : ''
+  const searchParams = useSearchParams()
+  const id = searchParams.get('id') ?? ''
   const router = useRouter()
   const { pushFromEvent } = useNotifications()
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
