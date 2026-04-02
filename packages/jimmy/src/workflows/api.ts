@@ -381,7 +381,7 @@ export async function handleWorkflowsRequest(
 
         return json(res, { reply, workflow, node }), true;
       } catch (err) {
-        logger.error('[workflows/assist]', err);
+        logger.error(`[workflows/assist] ${err}`);
         return json(res, { error: 'Assistant unavailable', reply: 'L\'assistant n\'est pas disponible pour le moment.' }, 503), true;
       }
     }
