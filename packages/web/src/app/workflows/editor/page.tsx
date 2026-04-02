@@ -123,6 +123,19 @@ function WorkflowEditorPageInner() {
   const id = searchParams.get('id') ?? ''
   const router = useRouter()
   const { pushFromEvent } = useNotifications()
+  const [waWelcomeMessage, setWaWelcomeMessage] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    api.getConfig().then((cfg: Record<string, unknown>) => {
+      const portal = cfg?.portal as Record<string, unknown> | undefined
+      const onboarding = portal?.workflowAssistantOnboarding ?? true
+      if (onboarding) {
+        const msg = (portal?.workflowAssistantWelcome as string) ??
+          'Bonjour\u00a0! Je suis votre assistant workflow. D\u00e9crivez votre workflow en langage naturel et je vous aiderai \u00e0 le construire.'
+        setWaWelcomeMessage(msg)
+      }
+    }).catch(() => {})
+  }, [])
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const dragTypeRef = useRef<NodeType | null>(null)
   const modeDragTypeRef = useRef<string | null>(null)
@@ -313,7 +326,7 @@ function WorkflowEditorPageInner() {
           <PropertiesPanel />
         </div>
       </div>
-      <WorkflowAssistant workflowId={id} />
+      <WorkflowAssistant workflowId={id} welcomeMessage={waWelcomeMessage} />
     </PageLayout>
   )
 }

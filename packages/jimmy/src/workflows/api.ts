@@ -1,4 +1,7 @@
 import type { IncomingMessage as HttpRequest, ServerResponse } from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { workflowEngine } from './engine.js';
 import type { WorkflowDefinition, TriggerPayload } from './types.js';
 import { nodeRegistry } from './registry.js';
@@ -348,12 +351,38 @@ export async function handleWorkflowsRequest(
         ? `${contextParts.join('\n\n')}\n\n---\n\nUser request: ${body.message}`
         : body.message;
 
+      // Resolve workflow-architect employee and their Hermes profile system prompt
+      const FALLBACK_SYSTEM_PROMPT = 'Tu es un expert en conception de workflows Jinn. Tu connais tous les node types (TRIGGER, AGENT, CONDITION, NOTIFY, MOVE_CARD, HTTP, SET_VAR, TRANSFORM, LOG, WAIT, DONE, ERROR), leurs configurations, et les bonnes pratiques. Quand tu génères un workflow complet, réponds TOUJOURS avec un bloc JSON valide. Quand tu suggères un seul node, utilise {\"node\": {...}}.';
+
+      let resolvedSystemPrompt: string | undefined;
+      let resolvedSource = 'jinn-workflow-architect';
+
+      try {
+        const { scanOrg } = await import('../gateway/org.js');
+        const orgRegistry = scanOrg();
+        const waEmployee = orgRegistry.get('workflow-architect');
+        if (waEmployee?.hermesProfile) {
+          const claudeMdPath = path.join(os.homedir(), '.hermes', 'profiles', waEmployee.hermesProfile, 'CLAUDE.md');
+          if (fs.existsSync(claudeMdPath)) {
+            resolvedSystemPrompt = fs.readFileSync(claudeMdPath, 'utf-8');
+            resolvedSource = `jinn-${waEmployee.hermesProfile}`;
+            logger.info(`[workflows/assist] Using workflow-architect hermesProfile "${waEmployee.hermesProfile}" system prompt`);
+          }
+        }
+      } catch (orgErr) {
+        logger.warn(`[workflows/assist] Could not load workflow-architect org profile, using fallback: ${orgErr}`);
+      }
+
+      if (!resolvedSystemPrompt) {
+        resolvedSystemPrompt = FALLBACK_SYSTEM_PROMPT;
+      }
+
       try {
         const client = hermesConnector.getClient();
         // Create a session for the workflow-architect profile
         const hermesSession = await client.createSession({
-          source: 'jinn-workflow-architect',
-          systemPrompt: 'Tu es un expert en conception de workflows Jinn. Tu connais tous les node types (TRIGGER, AGENT, CONDITION, NOTIFY, MOVE_CARD, HTTP, SET_VAR, TRANSFORM, LOG, WAIT, DONE, ERROR), leurs configurations, et les bonnes pratiques. Quand tu génères un workflow complet, réponds TOUJOURS avec un bloc JSON valide. Quand tu suggères un seul node, utilise {\"node\": {...}}.',
+          source: resolvedSource,
+          systemPrompt: resolvedSystemPrompt,
         });
 
         // Stream the chat and collect the reply

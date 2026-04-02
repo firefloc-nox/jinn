@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { MessageSquare, X, Send } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useWorkflowStore } from '@/lib/workflows/store'
@@ -18,15 +18,38 @@ function makeNodeId() {
   return `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
-export function WorkflowAssistant({ workflowId }: { workflowId?: string }) {
+export function WorkflowAssistant({
+  workflowId,
+  welcomeMessage,
+}: {
+  workflowId?: string
+  welcomeMessage?: string
+}) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
+  const onboardedRef = useRef(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [lang] = useState<Lang>(() => detectLang())
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const { definition, nodes, addNode, setDefinition } = useWorkflowStore()
+
+  // Onboarding: show welcome message on first open
+  useEffect(() => {
+    if (!open) return
+    if (onboardedRef.current) return
+    if (messages.length > 0) return
+    if (!welcomeMessage) return
+
+    // Check localStorage to avoid re-showing after page reload
+    const lsKey = `jinn-wa-onboarded-${workflowId ?? 'default'}`
+    if (typeof window !== 'undefined' && localStorage.getItem(lsKey)) return
+
+    onboardedRef.current = true
+    if (typeof window !== 'undefined') localStorage.setItem(lsKey, '1')
+    setMessages([{ role: 'assistant', content: welcomeMessage }])
+  }, [open, welcomeMessage, workflowId, messages.length])
 
   async function handleSend() {
     const msg = input.trim()

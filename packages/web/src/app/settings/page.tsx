@@ -113,6 +113,9 @@ interface Config {
   portal?: {
     portalName?: string
     operatorName?: string
+    workflowAssistantEmployee?: string
+    workflowAssistantOnboarding?: boolean
+    workflowAssistantWelcome?: string
   }
   [key: string]: unknown
 }
@@ -1216,6 +1219,63 @@ export default function SettingsPage() {
                   "Wait" pauses the session and continues automatically when Claude resets.
                   "Switch" answers immediately using GPT, then returns to Claude once the reset window passes.
                 </div>
+              </Section>
+
+              {/* -- Section 5b: Workflow Assistant -- */}
+              <Section title="Workflow Assistant">
+                <FieldRow label="Employee">
+                  <SettingsSelect
+                    value={config.portal?.workflowAssistantEmployee ?? 'workflow-architect'}
+                    onChange={(v) =>
+                      updateConfig(['portal', 'workflowAssistantEmployee'], v)
+                    }
+                    options={[
+                      { value: 'workflow-architect', label: 'workflow-architect (default)' },
+                      ...employees.map((e) => ({ value: e.name, label: e.displayName })),
+                    ]}
+                  />
+                </FieldRow>
+                <div
+                  className="text-[length:var(--text-caption1)] text-[var(--label-secondary)] mt-[4px]"
+                >
+                  Which Jinn employee handles workflow assistance in the editor.
+                </div>
+
+                <div
+                  className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]"
+                />
+
+                <FieldRow label="Show Welcome Message">
+                  <ToggleSwitch
+                    checked={config.portal?.workflowAssistantOnboarding ?? true}
+                    onChange={(v) =>
+                      updateConfig(['portal', 'workflowAssistantOnboarding'], v)
+                    }
+                  />
+                </FieldRow>
+                <div
+                  className="text-[length:var(--text-caption1)] text-[var(--label-secondary)] mt-[4px]"
+                >
+                  Show a welcome message on first open of the workflow assistant.
+                </div>
+
+                {(config.portal?.workflowAssistantOnboarding ?? true) && (
+                  <>
+                    <div
+                      className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]"
+                    />
+                    <FieldRow label="Welcome Message">
+                      <textarea
+                        className="w-full rounded-[var(--radius-2)] border border-[var(--separator)] bg-[var(--fill-tertiary)] px-[var(--space-2)] py-[var(--space-2)] text-[length:var(--text-body)] text-[var(--label-primary)] resize-y min-h-[80px]"
+                        value={config.portal?.workflowAssistantWelcome ?? 'Bonjour\u00a0! Je suis votre assistant workflow. D\u00e9crivez votre workflow en langage naturel et je vous aiderai \u00e0 le construire.'}
+                        onChange={(e) =>
+                          updateConfig(['portal', 'workflowAssistantWelcome'], e.target.value)
+                        }
+                        placeholder="Welcome message shown on first open..."
+                      />
+                    </FieldRow>
+                  </>
+                )}
               </Section>
 
               {/* -- Section 6: Connectors -- */}
