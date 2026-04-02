@@ -16,7 +16,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Zap } from "lucide-react";
+import { Zap, PackagePlus } from "lucide-react";
 import { useSettings } from "@/app/settings-provider";
 
 interface Skill {
@@ -120,13 +120,34 @@ export default function SkillsPage() {
         ) : skills.length === 0 && !error ? (
           <Card>
             <CardContent>
-              <div className="text-center p-[var(--space-6)]">
-                <p className="text-[length:var(--text-body)] text-[var(--text-tertiary)]">
-                  No skills yet
-                </p>
-                <p className="text-[length:var(--text-caption1)] text-[var(--text-quaternary)] mt-[var(--space-1)]">
-                  Chat with {portalName} to teach new skills
-                </p>
+              <div className="flex flex-col items-center text-center p-[var(--space-8)] gap-[var(--space-4)]">
+                <div
+                  className="w-14 h-14 rounded-[var(--radius-lg,16px)] flex items-center justify-center text-[var(--accent)]"
+                  style={{
+                    background:
+                      "color-mix(in srgb, var(--accent) 10%, transparent)",
+                  }}
+                >
+                  <PackagePlus size={28} />
+                </div>
+                <div>
+                  <p className="text-[length:var(--text-body)] font-[var(--weight-semibold)] text-[var(--text-primary)] mb-[var(--space-1)]">
+                    No skills installed yet
+                  </p>
+                  <p className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] max-w-xs mx-auto">
+                    Skills extend {portalName}&apos;s capabilities. Chat with {portalName} to teach it something new, or add a <code className="font-mono text-[var(--accent)]">.md</code> skill file to <code className="font-mono text-[var(--accent)]">~/.jinn/skills/</code>.
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    alert(
+                      `To install your first skill, chat with ${portalName} and ask it to learn something new, or place a Markdown (.md) skill file in ~/.jinn/skills/`,
+                    )
+                  }
+                  className="py-[var(--space-2)] px-[var(--space-5)] rounded-[var(--radius-md,12px)] text-white border-none cursor-pointer text-[length:var(--text-body)] font-[var(--weight-medium)] bg-[var(--accent)] hover:opacity-90 transition-opacity"
+                >
+                  Install your first skill
+                </button>
               </div>
             </CardContent>
           </Card>

@@ -1,3 +1,6 @@
+import type { BoardConfig, BoardCard, BoardColumn } from './boards/types'
+export type { BoardConfig, BoardCard, BoardColumn }
+
 export interface TranscriptContentBlock {
   type: 'text' | 'tool_use' | 'tool_result' | 'thinking'
   text?: string
@@ -349,6 +352,63 @@ export const api = {
     get<TranscriptEntry[]>(`/api/sessions/${id}/transcript`),
   crossRequest: (body: { fromEmployee: string; service: string; prompt: string; parentSessionId?: string }) =>
     post<Record<string, unknown>>('/api/org/cross-request', body),
+  // ── Workflow API ──────────────────────────────────────────────────────────
+  listWorkflows: () => get<Record<string, unknown>[]>('/api/workflows'),
+  getWorkflow: (id: string) => get<Record<string, unknown>>(`/api/workflows/${id}`),
+  createWorkflow: (def: Record<string, unknown>) => post<Record<string, unknown>>('/api/workflows', def),
+  updateWorkflow: (id: string, def: Record<string, unknown>) => put<Record<string, unknown>>(`/api/workflows/${id}`, def),
+  toggleWorkflow: (id: string, enabled: boolean) => patch<Record<string, unknown>>(`/api/workflows/${id}/toggle`, { enabled }),
+  deleteWorkflow: (id: string) => del<Record<string, unknown>>(`/api/workflows/${id}`),
+  triggerWorkflow: (id: string, inputs?: Record<string, unknown>) => post<Record<string, unknown>>(`/api/workflows/${id}/trigger`, inputs ?? {}),
+  getWorkflowRuns: (id: string) => get<Record<string, unknown>[]>(`/api/workflows/${id}/runs`),
+  getRun: (runId: string) => get<Record<string, unknown>>(`/api/workflows/runs/${runId}`),
+  getRunSteps: (runId: string) => get<Record<string, unknown>[]>(`/api/workflows/runs/${runId}/steps`),
+  approveRun: (runId: string, data?: unknown) => post<Record<string, unknown>>(`/api/workflows/runs/${runId}/approve`, data ?? {}),
+  cancelRun: (runId: string) => del<Record<string, unknown>>(`/api/workflows/runs/${runId}`),
+  getNodeTypes: () => get<Record<string, unknown>[]>('/api/workflows/node-types'),
+  getWorkflowTemplates: () => get<unknown[]>('/api/workflows/templates'),
+
+  patchCard: (dept: string, cardId: string, fields: Record<string, unknown>) =>
+    patch<Record<string, unknown>>(`/api/org/departments/${dept}/board/cards/${cardId}`, fields),
+
+  // ── Boards API ───────────────────────────────────────────────────────────
+  listBoards: () => get<BoardConfig[]>('/api/boards'),
+  createBoard: (data: { name: string; description?: string; columns?: BoardColumn[] }) =>
+    post<BoardConfig>('/api/boards', data),
+  getBoard: (id: string) => get<{ config: BoardConfig; cards: BoardCard[] }>(`/api/boards/${id}`),
+  updateBoard: (id: string, data: Partial<BoardConfig>) =>
+    patch<BoardConfig>(`/api/boards/${id}`, data),
+  deleteBoard: (id: string) => del<void>(`/api/boards/${id}`),
+  // Cards
+  getBoardCards: (id: string) => get<BoardCard[]>(`/api/boards/${id}/cards`),
+  createBoardCard: (boardId: string, data: Partial<BoardCard> & { title: string; columnId: string }) =>
+    post<BoardCard>(`/api/boards/${boardId}/cards`, data),
+  patchBoardCard: (boardId: string, cardId: string, data: Partial<BoardCard>) =>
+    patch<BoardCard>(`/api/boards/${boardId}/cards/${cardId}`, data),
+  deleteBoardCard: (boardId: string, cardId: string) =>
+    del<void>(`/api/boards/${boardId}/cards/${cardId}`),
+  // Columns
+  addColumn: (boardId: string, data: { title: string; color?: string }) =>
+    post<BoardConfig>(`/api/boards/${boardId}/columns`, data),
+  updateColumn: (boardId: string, colId: string, data: { title?: string; color?: string }) =>
+    patch<BoardConfig>(`/api/boards/${boardId}/columns/${colId}`, data),
+  deleteColumn: (boardId: string, colId: string) =>
+    del<BoardConfig>(`/api/boards/${boardId}/columns/${colId}`),
+  reorderColumns: (boardId: string, order: string[]) =>
+    put<BoardConfig>(`/api/boards/${boardId}/columns/reorder`, order),
+
+  // ── Costs API ─────────────────────────────────────────────────────────────
+  getCostSummary: (period: 'day' | 'week' | 'month' = 'month') =>
+    get<{
+      total: number
+      daily: { date: string; cost: number }[]
+      byEmployee: { employee: string; cost: number; sessions: number }[]
+      byDepartment: { department: string; cost: number }[]
+      hermes?: { totalEstimatedCostUsd: number; sessionCount: number; available: boolean }
+    }>(`/api/costs/summary?period=${period}`),
+  getCostsByEmployee: () =>
+    get<{ employee: string; cost: number; sessions: number; turns: number }[]>('/api/costs/by-employee'),
+
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)

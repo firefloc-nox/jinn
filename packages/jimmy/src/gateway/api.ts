@@ -58,6 +58,7 @@ import {
   HERMES_CRON_FILE,
 } from "../cron/hermes-jobs.js";
 import QRCode from "qrcode";
+import { gatewayEventBus } from "./event-bus.js";
 import { WhatsAppConnector } from "../connectors/whatsapp/index.js";
 import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
@@ -1445,6 +1446,14 @@ export async function handleApiRequest(
       const updatedRegistry = scanOrg();
       const created = updatedRegistry.get(safeName);
       context.emit("org:updated", { employee: safeName });
+      // Emit board:card_added if employee was assigned to a department (added as a board card)
+      if (typeof body.department === "string" && body.department) {
+        gatewayEventBus.emit("board:card_added", {
+          board: body.department,
+          cardId: safeName,
+          title: (typeof body.displayName === "string" && body.displayName) ? body.displayName : safeName,
+        });
+      }
       return json(res, created ?? { name: safeName }, 201);
     }
 
@@ -1541,7 +1550,7 @@ Handle this as a priority request from a colleague.`;
     params = matchRoute("/api/org/departments/:name/board", pathname);
     if (method === "GET" && params) {
       const boardPath = path.join(ORG_DIR, params.name, "board.json");
-      if (!fs.existsSync(boardPath)) return notFound(res);
+      if (!fs.existsSync(boardPath)) return json(res, []);
       const board = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
       return json(res, board);
     }
@@ -1556,9 +1565,52 @@ Handle this as a priority request from a colleague.`;
       if (!_parsed.ok) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const body = _parsed.body as any;
+      // Detect new cards to emit board:card_added events
+      const oldCards: Array<{ id: string; title?: string }> = [];
+      if (fs.existsSync(boardPath)) {
+        try {
+          const oldBoard = JSON.parse(fs.readFileSync(boardPath, "utf-8"));
+          if (Array.isArray(oldBoard?.cards)) oldCards.push(...oldBoard.cards);
+        } catch { /* ignore */ }
+      }
+      const oldCardIds = new Set(oldCards.map((c) => c.id));
       fs.writeFileSync(boardPath, JSON.stringify(body, null, 2));
       context.emit("board:updated", { department: p.name });
+      // Emit board:card_added for any new cards
+      const newCards: Array<{ id: string; title?: string }> = Array.isArray(body?.cards) ? body.cards : [];
+      for (const card of newCards) {
+        if (card.id && !oldCardIds.has(card.id)) {
+          gatewayEventBus.emit("board:card_added", { board: p.name, cardId: card.id, title: card.title ?? card.id });
+        }
+      }
       return json(res, { status: "ok" });
+    }
+
+    // PATCH /api/org/departments/:name/board/cards/:cardId
+    {
+      const p = matchRoute("/api/org/departments/:name/board/cards/:cardId", pathname);
+      if (method === "PATCH" && p) {
+        const boardPath = path.join(ORG_DIR, p.name, "board.json");
+        if (!fs.existsSync(boardPath)) return notFound(res);
+        const _parsed = await readJsonBody(req, res);
+        if (!_parsed.ok) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updates = _parsed.body as Record<string, unknown>;
+        const boardData = JSON.parse(fs.readFileSync(boardPath, "utf-8")) as { cards?: Array<{ id: string; status: string; [key: string]: unknown }>; [key: string]: unknown };
+        const cards = boardData.cards;
+        if (!Array.isArray(cards)) return badRequest(res, "Board has no cards array");
+        const cardIdx = cards.findIndex((c) => c.id === p.cardId);
+        if (cardIdx === -1) return notFound(res);
+        const card = cards[cardIdx];
+        const oldStatus = card.status;
+        Object.assign(card, updates);
+        cards[cardIdx] = card;
+        fs.writeFileSync(boardPath, JSON.stringify(boardData, null, 2));
+        const newStatus = card.status;
+        context.emit("board:card_moved", { board: p.name, cardId: p.cardId, from: oldStatus, to: newStatus });
+        gatewayEventBus.emit("board:card_moved", { board: p.name, cardId: p.cardId, from: oldStatus, to: newStatus });
+        return json(res, card);
+      }
     }
 
     // GET /api/skills/search?q=<query> — search the skills.sh registry
