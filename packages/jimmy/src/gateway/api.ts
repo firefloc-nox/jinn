@@ -847,7 +847,16 @@ export async function handleApiRequest(
       const prompt = body.prompt || body.message;
       if (!prompt) return badRequest(res, "prompt or message is required");
       const config = context.getConfig();
-      const engineName = body.engine || config.engines.default;
+      // Resolve engine from employee YAML if employee specified — allows per-employee engine override
+      let engineName = body.engine || config.engines.default;
+      if (body.employee && !body.engine) {
+        try {
+          const { scanOrg } = await import("./org.js");
+          const empEntry = scanOrg().get(body.employee);
+          if (empEntry?.engine) engineName = empEntry.engine;
+          if (empEntry?.model && !body.model) body.model = empEntry.model;
+        } catch { /* fallback to default */ }
+      }
       const sessionKey = `web:${Date.now()}`;
       const session = createSession({
         engine: engineName,
