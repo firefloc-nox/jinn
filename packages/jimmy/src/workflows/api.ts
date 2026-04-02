@@ -4,6 +4,7 @@ import type { WorkflowDefinition, TriggerPayload } from './types.js';
 import { nodeRegistry } from './registry.js';
 import { handleWebhookTrigger } from './triggers/webhook.js';
 import { NodeType } from './types.js';
+import { logger } from '../shared/logger.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ export async function handleWorkflowsRequest(
   req: HttpRequest,
   res: ServerResponse,
   config?: Record<string, unknown>,
+  hermesConnector?: import('../connectors/hermes/index.js').HermesDataConnector | null,
 ): Promise<boolean> {
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
@@ -302,6 +304,85 @@ export async function handleWorkflowsRequest(
         return json(res, run, 202), true;
       } catch (err) {
         return serverError(res, err instanceof Error ? err.message : String(err)), true;
+      }
+    }
+
+    // POST /api/workflows/assist — AI assistant for workflow design
+    if (method === 'POST' && pathname === '/api/workflows/assist') {
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return true;
+
+      const body = parsed.body as {
+        message?: string;
+        context?: {
+          workflow?: unknown;
+          employees?: unknown[];
+          boards?: unknown[];
+        };
+      };
+
+      if (!body.message) return badRequest(res, 'message is required'), true;
+
+      if (!hermesConnector || !hermesConnector.isHealthy()) {
+        return json(res, { error: 'Hermes WebAPI unavailable', reply: 'L\'assistant n\'est pas disponible pour le moment.' }, 503), true;
+      }
+
+      // Build context-aware message
+      const contextParts: string[] = [];
+      if (body.context?.workflow) {
+        contextParts.push(`Current workflow:\n${JSON.stringify(body.context.workflow, null, 2)}`);
+      }
+      if (body.context?.employees?.length) {
+        const empList = (body.context.employees as Array<{name: string; displayName?: string; role?: string}>)
+          .map(e => `- ${e.name} (${e.displayName ?? e.name}${e.role ? ', ' + e.role : ''})`)
+          .join('\n');
+        contextParts.push(`Available employees:\n${empList}`);
+      }
+      if (body.context?.boards?.length) {
+        const boardList = (body.context.boards as Array<{id: string; name: string}>)
+          .map(b => `- ${b.id}: ${b.name}`).join('\n');
+        contextParts.push(`Available boards:\n${boardList}`);
+      }
+
+      const fullMessage = contextParts.length
+        ? `${contextParts.join('\n\n')}\n\n---\n\nUser request: ${body.message}`
+        : body.message;
+
+      try {
+        const client = hermesConnector.getClient();
+        // Create a session for the workflow-architect profile
+        const hermesSession = await client.createSession({
+          source: 'jinn-workflow-architect',
+          systemPrompt: 'Tu es un expert en conception de workflows Jinn. Tu connais tous les node types (TRIGGER, AGENT, CONDITION, NOTIFY, MOVE_CARD, HTTP, SET_VAR, TRANSFORM, LOG, WAIT, DONE, ERROR), leurs configurations, et les bonnes pratiques. Quand tu génères un workflow complet, réponds TOUJOURS avec un bloc JSON valide. Quand tu suggères un seul node, utilise {\"node\": {...}}.',
+        });
+
+        // Stream the chat and collect the reply
+        let reply = '';
+        const stream = await client.chatStream(hermesSession.id, fullMessage);
+        for await (const event of stream) {
+          if (event.event === 'run.delta' && event.data.delta) {
+            reply += event.data.delta;
+          }
+        }
+
+        if (!reply) reply = 'Aucune réponse reçue de l\'assistant.';
+
+        // Try to extract JSON from the reply
+        let workflow: unknown = undefined;
+        let node: unknown = undefined;
+        const jsonMatch = reply.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+        if (jsonMatch) {
+          try {
+            const parsed2 = JSON.parse(jsonMatch[1]);
+            if (parsed2.node) node = parsed2.node;
+            else if (parsed2.nodes) workflow = parsed2;
+          } catch { /* not valid JSON */ }
+        }
+
+        return json(res, { reply, workflow, node }), true;
+      } catch (err) {
+        logger.error('[workflows/assist]', err);
+        return json(res, { error: 'Assistant unavailable', reply: 'L\'assistant n\'est pas disponible pour le moment.' }, 503), true;
       }
     }
 

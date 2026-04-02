@@ -601,7 +601,7 @@ export async function startGateway(
       }
       // Workflow routes
       if (url.startsWith("/api/workflows")) {
-        handleWorkflowsRequest(req, res, currentConfig as unknown as Record<string, unknown>).then((handled) => {
+        handleWorkflowsRequest(req, res, currentConfig as unknown as Record<string, unknown>, (connectorMap.get('hermes-data') as import('../connectors/hermes/index.js').HermesDataConnector) ?? null).then((handled) => {
           if (!handled) handleApiRequest(req, res, apiContext);
         }).catch((err) => {
           res.writeHead(500, { "Content-Type": "application/json" });
