@@ -397,6 +397,18 @@ export const api = {
   reorderColumns: (boardId: string, order: string[]) =>
     put<BoardConfig>(`/api/boards/${boardId}/columns/reorder`, order),
 
+  // ── Costs API ─────────────────────────────────────────────────────────────
+  getCostSummary: (period: 'day' | 'week' | 'month' = 'month') =>
+    get<{
+      total: number
+      daily: { date: string; cost: number }[]
+      byEmployee: { employee: string; cost: number; sessions: number }[]
+      byDepartment: { department: string; cost: number }[]
+      hermes?: { totalEstimatedCostUsd: number; sessionCount: number; available: boolean }
+    }>(`/api/costs/summary?period=${period}`),
+  getCostsByEmployee: () =>
+    get<{ employee: string; cost: number; sessions: number; turns: number }[]>('/api/costs/by-employee'),
+
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)
