@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ReactFlow, Background, MiniMap, Controls, BackgroundVariant,
@@ -117,7 +117,7 @@ function Toolbar({ workflow, isDirty, onSave, onTestRun, onToggle }: ToolbarProp
 
 // ─── Editor Page ─────────────────────────────────────────────────────────────
 
-export default function WorkflowEditorPage() {
+function WorkflowEditorPageInner() {
   const searchParams = useSearchParams()
   const id = searchParams.get('id') ?? ''
   const router = useRouter()
@@ -313,5 +313,13 @@ export default function WorkflowEditorPage() {
         </div>
       </div>
     </PageLayout>
+  )
+}
+
+export default function WorkflowEditorPage() {
+  return (
+    <Suspense fallback={null}>
+      <WorkflowEditorPageInner />
+    </Suspense>
   )
 }

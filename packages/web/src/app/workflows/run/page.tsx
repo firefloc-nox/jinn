@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ReactFlow, Background, BackgroundVariant, MiniMap, Controls,
@@ -118,7 +118,7 @@ function StepLogsPanel({ steps }: { steps: WorkflowStep[] }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function WorkflowRunPage() {
+function WorkflowRunPageInner() {
   const searchParams = useSearchParams()
   const runId = searchParams.get('id') ?? ''
   const router = useRouter()
@@ -318,5 +318,13 @@ export default function WorkflowRunPage() {
         </div>
       </div>
     </PageLayout>
+  )
+}
+
+export default function WorkflowRunPage() {
+  return (
+    <Suspense fallback={null}>
+      <WorkflowRunPageInner />
+    </Suspense>
   )
 }
