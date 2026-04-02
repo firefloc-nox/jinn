@@ -27,6 +27,10 @@ import { notifyHandler } from './nodes/notify.js';
 import { waitHandler } from './nodes/wait.js';
 import { cronHandler } from './nodes/cron.js';
 import { doneHandler } from './nodes/done.js';
+import { httpHandler } from './nodes/http.js';
+import { setVarHandler } from './nodes/set-var.js';
+import { transformHandler } from './nodes/transform.js';
+import { logHandler } from './nodes/log.js';
 
 nodeRegistry.register(triggerHandler);
 nodeRegistry.register(agentHandler);
@@ -36,6 +40,10 @@ nodeRegistry.register(notifyHandler);
 nodeRegistry.register(waitHandler);
 nodeRegistry.register(cronHandler);
 nodeRegistry.register(doneHandler);
+nodeRegistry.register(httpHandler);
+nodeRegistry.register(setVarHandler);
+nodeRegistry.register(transformHandler);
+nodeRegistry.register(logHandler);
 
 // ── DB helpers ─────────────────────────────────────────────────────────────
 
@@ -301,6 +309,12 @@ export class WorkflowRunner extends EventEmitter {
               return;
             }
 
+            // Apply context updates from node result
+            if (result.context_updates) {
+              Object.assign(context, result.context_updates);
+              updateRun(runId, { context });
+            }
+
             updateStep(stepId, {
               status: 'completed',
               output: result.output,
@@ -454,6 +468,12 @@ export class WorkflowRunner extends EventEmitter {
           updateRun(runId, { status: 'waiting', context, current_node_id: currentNodeId });
           this.emit('run.suspended', { runId, suspend: result.suspend });
           return;
+        }
+
+        // Apply context updates from node result
+        if (result.context_updates) {
+          Object.assign(context, result.context_updates);
+          updateRun(runId, { context });
         }
 
         updateStep(stepId, { status: 'completed', output: result.output, completed_at: new Date().toISOString() });

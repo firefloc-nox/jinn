@@ -14,6 +14,10 @@ export enum NodeType {
   CRON = 'cron',
   DONE = 'done',
   ERROR = 'error',
+  HTTP = 'http',
+  SET_VAR = 'set_var',
+  TRANSFORM = 'transform',
+  LOG = 'log',
 }
 
 export enum TriggerType {

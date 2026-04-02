@@ -8,6 +8,7 @@ export interface NodeResult {
   output: unknown;
   next: string | string[] | null;
   suspend?: SuspendInfo;
+  context_updates?: Record<string, unknown>;
 }
 
 export interface NodeServices {
