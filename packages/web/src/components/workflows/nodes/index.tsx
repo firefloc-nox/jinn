@@ -4,7 +4,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import {
   Zap, Bot, GitBranch, KanbanSquare, Bell, Clock, Check, X,
-  RefreshCw,
+  RefreshCw, Globe, Variable, Shuffle, FileText,
 } from 'lucide-react'
 import { useWorkflowStore, type WorkflowEditorStore } from '@/lib/workflows/store'
 import type { NodeType, StepStatus } from '@/lib/workflows/types'
@@ -21,6 +21,10 @@ const NODE_COLORS: Record<NodeType, string> = {
   CRON: '#f59e0b',
   DONE: '#22c55e',
   ERROR: '#ef4444',
+  HTTP: '#06b6d4',
+  SET_VAR: '#8b5cf6',
+  TRANSFORM: '#64748b',
+  LOG: '#64748b',
 }
 
 const NODE_ICONS: Record<NodeType, React.ComponentType<{ size?: number }>> = {
@@ -33,6 +37,10 @@ const NODE_ICONS: Record<NodeType, React.ComponentType<{ size?: number }>> = {
   CRON: RefreshCw,
   DONE: Check,
   ERROR: X,
+  HTTP: Globe,
+  SET_VAR: Variable,
+  TRANSFORM: Shuffle,
+  LOG: FileText,
 }
 
 const NODE_LABELS: Record<NodeType, string> = {
@@ -45,6 +53,10 @@ const NODE_LABELS: Record<NodeType, string> = {
   CRON: 'Cron',
   DONE: 'Done',
   ERROR: 'Error',
+  HTTP: 'HTTP',
+  SET_VAR: 'Set Var',
+  TRANSFORM: 'Transform',
+  LOG: 'Log',
 }
 
 // ─── Status overlay ─────────────────────────────────────────────────────────
@@ -262,6 +274,56 @@ export const ErrorNode = memo(({ id, data, selected }: NodeProps) => (
 ))
 ErrorNode.displayName = 'ErrorNode'
 
+export const HttpNode = memo(({ id, data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  return (
+    <BaseNode nodeType="HTTP" id={id} selected={selected}>
+      <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+        {String(d.method ?? 'GET')} {String(d.url ?? '...')}
+      </span>
+    </BaseNode>
+  )
+})
+HttpNode.displayName = 'HttpNode'
+
+export const SetVarNode = memo(({ id, data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  return (
+    <BaseNode nodeType="SET_VAR" id={id} selected={selected}>
+      <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+        {String(d.variable ?? '?')} = {String(d.value ?? '')}
+      </span>
+    </BaseNode>
+  )
+})
+SetVarNode.displayName = 'SetVarNode'
+
+export const TransformNode = memo(({ id, data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  return (
+    <BaseNode nodeType="TRANSFORM" id={id} selected={selected}>
+      <span style={{ color: 'var(--text-secondary)' }}>
+        {String(d.operation ?? 'uppercase')} → {String(d.output_var ?? '?')}
+      </span>
+    </BaseNode>
+  )
+})
+TransformNode.displayName = 'TransformNode'
+
+export const LogNode = memo(({ id, data, selected }: NodeProps) => {
+  const d = data as Record<string, unknown>
+  const level = String(d.level ?? 'info')
+  const levelColor = level === 'error' ? '#ef4444' : level === 'warn' ? '#f59e0b' : 'var(--text-secondary)'
+  return (
+    <BaseNode nodeType="LOG" id={id} selected={selected}>
+      <span style={{ color: levelColor }}>
+        [{level}] {String(d.message ?? '')}
+      </span>
+    </BaseNode>
+  )
+})
+LogNode.displayName = 'LogNode'
+
 // ─── Generic Mode Node ───────────────────────────────────────────────────────
 
 export const ModeNode = memo(({ id, data, selected }: NodeProps) => {
@@ -315,4 +377,8 @@ export const workflowNodeTypes = {
   cron: CronNode,
   done: DoneNode,
   error: ErrorNode,
+  http: HttpNode,
+  set_var: SetVarNode,
+  transform: TransformNode,
+  log: LogNode,
 }
