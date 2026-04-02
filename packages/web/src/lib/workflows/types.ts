@@ -1,4 +1,4 @@
-export type NodeType = 'TRIGGER' | 'AGENT' | 'CONDITION' | 'MOVE_CARD' | 'NOTIFY' | 'WAIT' | 'CRON' | 'DONE' | 'ERROR'
+export type NodeType = 'TRIGGER' | 'AGENT' | 'CONDITION' | 'MOVE_CARD' | 'NOTIFY' | 'WAIT' | 'CRON' | 'DONE' | 'ERROR' | 'HTTP' | 'SET_VAR' | 'TRANSFORM' | 'LOG'
 export type TriggerType = 'manual' | 'cron' | 'webhook' | 'kanban_card_added' | 'kanban_card_moved'
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'success' | 'error' | 'cancelled'
 export type StepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'waiting'
@@ -56,4 +56,29 @@ export interface WorkflowStep {
   error?: string
   startedAt?: string
   completedAt?: string
+}
+
+export interface HttpNodeConfig {
+  url: string
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  headers?: Record<string, string>
+  body?: string
+  output_var?: string
+}
+
+export interface SetVarNodeConfig {
+  variable: string
+  value: string
+}
+
+export interface TransformNodeConfig {
+  input_var: string
+  operation: 'json_parse' | 'json_stringify' | 'uppercase' | 'lowercase' | 'trim' | 'regex_extract'
+  regex?: string
+  output_var: string
+}
+
+export interface LogNodeConfig {
+  level: 'info' | 'warn' | 'error'
+  message: string
 }
