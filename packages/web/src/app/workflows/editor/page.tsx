@@ -13,6 +13,7 @@ import { useWorkflowStore } from '@/lib/workflows/store'
 import { workflowNodeTypes, ModeNode } from '@/components/workflows/nodes'
 import { NodePalette } from '@/components/workflows/node-palette'
 import { PropertiesPanel } from '@/components/workflows/properties-panel'
+import { WorkflowAssistant } from '@/components/workflows/workflow-assistant'
 import { useBreadcrumbs } from '@/context/breadcrumb-context'
 import { useNotifications } from '@/hooks/use-notifications'
 import type { WorkflowDefinition, NodeType } from '@/lib/workflows/types'
@@ -312,6 +313,7 @@ function WorkflowEditorPageInner() {
           <PropertiesPanel />
         </div>
       </div>
+      <WorkflowAssistant workflowId={id} />
     </PageLayout>
   )
 }

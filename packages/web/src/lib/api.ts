@@ -409,6 +409,9 @@ export const api = {
   getCostsByEmployee: () =>
     get<{ employee: string; cost: number; sessions: number; turns: number }[]>('/api/costs/by-employee'),
 
+  assistWorkflow: (message: string, context: object) =>
+    post<{ reply: string; workflow?: unknown; node?: unknown }>('/api/workflows/assist', { message, context }),
+
   uploadFile: async (file: File): Promise<UploadedFile> => {
     const form = new FormData()
     form.append('file', file)
