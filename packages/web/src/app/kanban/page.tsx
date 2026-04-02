@@ -177,7 +177,7 @@ function KanbanColumnView({
 
   return (
     <div
-      className={`flex flex-col w-[260px] shrink-0 rounded-[var(--radius-lg)] bg-[var(--fill-tertiary)] border transition-colors ${isOver ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_5%,var(--fill-tertiary))]' : 'border-[var(--separator)]'}`}
+      className={`group flex flex-col w-[260px] shrink-0 rounded-[var(--radius-lg)] bg-[var(--fill-tertiary)] border transition-colors ${isOver ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_5%,var(--fill-tertiary))]' : 'border-[var(--separator)]'}`}
       onDragOver={(e) => { e.preventDefault(); setIsOver(true) }}
       onDragLeave={() => setIsOver(false)}
       onDrop={handleDrop}
@@ -583,6 +583,8 @@ export default function KanbanPage() {
   const [editingBoardName, setEditingBoardName] = useState(false)
   const [boardNameDraft, setBoardNameDraft] = useState('')
   const boardNameInputRef = useRef<HTMLInputElement>(null)
+  const [showAddColumn, setShowAddColumn] = useState(false)
+  const [newColTitle, setNewColTitle] = useState('')
 
   // Load boards list + employees on mount
   useEffect(() => {
@@ -683,12 +685,14 @@ export default function KanbanPage() {
   }
 
   // ── Add column ──
-  async function handleAddColumn() {
+  async function handleAddColumn(title: string) {
     if (!activeBoardId) return
-    const title = prompt('Column title:')?.trim()
-    if (!title) return
-    const updated = await api.addColumn(activeBoardId, { title })
+    const t = title.trim()
+    if (!t) return
+    const updated = await api.addColumn(activeBoardId, { title: t })
     setBoardConfig(updated)
+    setShowAddColumn(false)
+    setNewColTitle('')
   }
 
   // ── Delete column ──
@@ -850,13 +854,41 @@ export default function KanbanPage() {
                     <p className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mt-0.5">{boardConfig.description}</p>
                   )}
                 </div>
-                <button
-                  onClick={handleAddColumn}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--fill-secondary)] border border-[var(--separator)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--fill-tertiary)] text-[length:var(--text-caption1)] font-medium cursor-pointer transition-colors shrink-0"
-                >
-                  <Plus size={13} />
-                  Add Column
-                </button>
+                {showAddColumn ? (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input
+                      autoFocus
+                      value={newColTitle}
+                      onChange={(e) => setNewColTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddColumn(newColTitle)
+                        if (e.key === 'Escape') { setShowAddColumn(false); setNewColTitle('') }
+                      }}
+                      placeholder="Column title..."
+                      className="px-2 py-1.5 rounded-[var(--radius-md)] bg-[var(--bg)] border border-[var(--accent)] text-[var(--text-primary)] text-[length:var(--text-caption1)] outline-none w-[160px]"
+                    />
+                    <button
+                      onClick={() => handleAddColumn(newColTitle)}
+                      className="px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-[length:var(--text-caption1)] font-semibold border-none cursor-pointer"
+                    >
+                      Add
+                    </button>
+                    <button
+                      onClick={() => { setShowAddColumn(false); setNewColTitle('') }}
+                      className="px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--fill-secondary)] text-[var(--text-secondary)] text-[length:var(--text-caption1)] font-semibold border-none cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowAddColumn(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--fill-secondary)] border border-[var(--separator)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--fill-tertiary)] text-[length:var(--text-caption1)] font-medium cursor-pointer transition-colors shrink-0"
+                  >
+                    <Plus size={13} />
+                    Add Column
+                  </button>
+                )}
               </div>
 
               {/* Filter bar */}
@@ -929,7 +961,7 @@ export default function KanbanPage() {
 
                     {/* Add column placeholder */}
                     <button
-                      onClick={handleAddColumn}
+                      onClick={() => setShowAddColumn(true)}
                       className="w-[260px] shrink-0 flex items-center justify-center gap-2 h-14 rounded-[var(--radius-lg)] border-2 border-dashed border-[var(--separator)] text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:border-[var(--accent)] bg-transparent cursor-pointer transition-colors text-[length:var(--text-footnote)] font-medium"
                     >
                       <Plus size={16} />
