@@ -1,8 +1,80 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 dist/
 .next/
+out/
+
+# Turbo cache
 .turbo/
+
+# TypeScript
 *.tsbuildinfo
+
+# Environment files
 .env
 .env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Git worktrees
 .worktrees/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Test results
+test-results/
+playwright-report/
+
+# SQLite databases (runtime state — not for version control)
+*.db
+*.db-wal
+*.db-shm
+
+# Jinn runtime state (generated at runtime in ~/.jinn/)
+# These are gitignored at the project level too as a safety net
+state.db
+state.db-wal
+state.db-shm
+auth.json
+auth.lock
+.update_check
+models_dev_cache.json
+
+# Workbench (internal QA artifacts, screenshots, internal plans)
+workbench/
+
+# Internal plan documents (superpowers-generated, not for public repo)
+docs/superpowers/
+docs/plans/
+JIMMY_WORKFLOW_AUDIT.md
+
+# Audio cache
+audio_cache/
+*.mp3
+
+# Temp files
+tmp/
+.tmp/

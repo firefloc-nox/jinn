@@ -48,17 +48,30 @@ When Claude Code gets better, Jinn gets better — automatically.
 ## ✨ Features
 
 - 🔌 **Triple engine support** — Claude Code CLI + Codex SDK + Gemini CLI
-- 💬 **Connectors** — Slack (threads + reactions), WhatsApp (QR auth), Discord (bot)
+- 🧠 **Hermes-first engine** — native WebAPI SSE transport, session resumable, profile-aware
+- 💬 **Connectors** — Slack (threads + reactions), WhatsApp (QR auth), Discord (bot), Telegram
 - 📎 **File attachments** — drag & drop files into web chat, passed through to engines
 - 📱 **Mobile-responsive** — collapsible sidebar and mobile-friendly dashboard
-- ⏰ **Cron scheduling** — hot-reloadable background jobs
+- ⏰ **Cron scheduling** — hot-reloadable background jobs (Hermes + Jinn-native unified)
 - 👥 **AI org system** — departments, ranks, managers, employees, task boards
 - 🌐 **Web dashboard** — chat, org map, kanban, cost tracking, cron visualizer
 - 🔄 **Hot-reload** — change config, cron, or org files without restarting
 - 🛠️ **Self-modification** — agents can edit their own config, skills, and org at runtime
 - 📦 **Skills system** — reusable markdown playbooks that engines follow natively
 - 🏢 **Multi-instance** — run multiple isolated Jinn instances side by side
-- 🔗 **MCP support** — connect to any MCP server
+- 🔗 **MCP support** — connect to any MCP server (browser, search, fetch, gateway)
+- 💰 **Cost analytics** — per-employee and per-department spend tracking
+- 📋 **Multi-board Kanban** — per-department boards + custom boards with drag-and-drop
+
+### 🧪 Experimental Features
+
+These features are implemented and functional but still evolving — APIs and UX may change:
+
+- ⚡ **Workflow engine** — visual no-code automation builder with 12 node types, 4 trigger types (cron, kanban, webhook, manual), AI assistant, and templates gallery
+- 🔗 **Workflow triggers** — react to kanban card moves, inbound webhooks (HMAC), cron schedules, or manual runs
+- 🤖 **Workflow AI Assistant** — describe what you want to automate, get a runnable workflow generated inline
+
+See [ROADMAP.md](ROADMAP.md) for the full list of planned features.
 
 ## 🚀 Quick Start
 
@@ -114,7 +127,7 @@ Starting with the Hermes-first refactor, **Hermes is the default brain** when av
 
 | Engine | Role |
 |--------|------|
-| **Hermes** | Primary brain — MCP-native, session-resumable, default when installed |
+| **Hermes** | Primary brain — MCP-native, session-resumable, WebAPI SSE transport, default when installed |
 | Claude Code | Fallback #1 — streaming, cost tracking, Max subscription support |
 | Codex | Fallback #2 — OpenAI GPT-based |
 | Gemini CLI | Fallback #3 — Google Gemini |
@@ -124,8 +137,9 @@ Starting with the Hermes-first refactor, **Hermes is the default brain** when av
 1. `jinn setup` detects if `hermes` is in your PATH (`hermes --version`)
 2. If found, it sets `engines.default: hermes` in `~/.jinn/config.yaml`
 3. The session manager routes all new sessions to Hermes by default
-4. If Hermes is unavailable, the fallback chain is tried in order: `claude → codex → gemini`
-5. Session metadata tracks `requestedBrain`, `actualExecutor`, and `fallbackUsed`
+4. Hermes uses a **WebAPI SSE transport** (port 8642) — no CLI spawn overhead for active sessions
+5. If Hermes is unavailable, the fallback chain is tried in order: `claude → codex → gemini`
+6. Session metadata tracks `requestedBrain`, `actualExecutor`, and `fallbackUsed`
 
 ### Config example with Hermes
 
@@ -164,6 +178,7 @@ name: backend-agent
 engine: hermes
 hermesProfile: coder        # activate a named Hermes profile
 hermesProvider: anthropic   # provider override (e.g. openrouter)
+hermesToolsets: terminal,file,web  # toolsets passed to Hermes
 model: claude-opus-4        # model hint passed to Hermes
 ```
 
@@ -230,6 +245,9 @@ jinn/
   packages/
     jimmy/          # Core gateway daemon + CLI
     web/            # Web dashboard (frontend)
+  docs/             # Architecture docs and migration guides
+  ROADMAP.md        # Planned features (Jinn-specific)
+  CHANGELOG.md      # Release history
   turbo.json        # Turborepo build configuration
   pnpm-workspace.yaml
   tsconfig.base.json
@@ -269,49 +287,49 @@ before running `pnpm dev`.
 | `pnpm status`      | Check if the gateway daemon is running                              |
 | `pnpm build`       | Build all packages                                                  |
 | `pnpm typecheck`   | Run TypeScript type checking                                        |
+| `pnpm test`        | Run all tests (vitest + playwright)                                 |
 | `pnpm lint`        | Lint all packages                                                   |
 | `pnpm clean`       | Clean build artifacts                                               |
 
 ## 🗺️ Roadmap
 
-Jinn is under active development. Here's what's coming:
+See [ROADMAP.md](ROADMAP.md) for the full Jinn-specific roadmap.
+
+Quick overview of what's coming:
 
 ### 🔌 Connectors
-- [x] **Discord** — bot integration via discord.js
-- [x] **WhatsApp** — Baileys-based connector with QR auth and media support
-- [x] **Telegram** — bot API connector with polling and user allowlist
-- [ ] **iMessage** — macOS-native via AppleScript bridge
-- [ ] **Email** — IMAP/SMTP connector for inbox monitoring and replies
-- [ ] **Webhooks** — generic inbound/outbound HTTP webhooks
+- [x] Discord — bot integration via discord.js
+- [x] WhatsApp — Baileys-based connector with QR auth and media support
+- [x] Telegram — bot API connector with polling and user allowlist
+- [ ] iMessage — macOS-native via AppleScript bridge
+- [ ] Email — IMAP/SMTP connector for inbox monitoring and replies
+- [ ] Webhooks — generic inbound/outbound HTTP webhooks
 
 ### 🧠 Engines
-- [x] **Gemini CLI** — Google's Gemini as a third engine option
-- [ ] **Local models** — Ollama / llama.cpp integration for offline use
-- [x] **Engine fallback chains** — auto-failover when primary engine is unavailable (Hermes-first)
+- [x] Gemini CLI — Google's Gemini as a third engine option
+- [x] Engine fallback chains — auto-failover when primary engine is unavailable (Hermes-first)
+- [ ] Local models — Ollama / llama.cpp integration for offline use
 
 ### 👥 Org System
-- [x] **Agent-to-agent messaging** — direct communication without board intermediary
-- [x] **Shared memory** — cross-session knowledge that persists across employees
-- [ ] **Performance tracking** — automatic quality scoring per employee over time
-- [x] **Auto-promotion** — promote employees to manager based on track record
+- [x] Agent-to-agent messaging — direct communication without board intermediary
+- [x] Hierarchical org — departments, ranks, managers, employees
+- [x] New Agent wizard — 3-step creation with Hermes profile
+- [ ] Performance tracking — automatic quality scoring per employee over time
+- [ ] Visual org chart — drag-and-drop reporting structure
 
 ### 🌐 Web Dashboard
-- [x] **Mobile-responsive UI** — collapsible sidebar, mobile-friendly chat
-- [x] **Live streaming** — watch agent responses stream in real-time
-- [x] **File attachments** — drag & drop files into chat with engine passthrough
-- [ ] **Approval workflows** — approve/reject agent actions from the dashboard
-- [ ] **Cost analytics** — per-employee, per-department cost breakdowns
+- [x] Mobile-responsive UI — collapsible sidebar, mobile-friendly chat
+- [x] Live streaming — watch agent responses stream in real-time
+- [x] File attachments — drag & drop files into chat with engine passthrough
+- [x] Cost analytics — per-employee, per-department breakdowns
+- [x] Multi-board Kanban — drag-and-drop with kanban workflow triggers
+- [ ] Approval workflows — approve/reject agent actions from the dashboard
 
 ### 🛠️ Platform
-- [ ] **Plugin system** — installable plugins for common integrations (Stripe, Linear, GitHub)
-- [ ] **REST API auth** — API keys for secure remote access
-- [ ] **Multi-user support** — team access with roles and permissions
-- [ ] **Docker image** — one-command deployment with `docker run`
-
-### 📦 Skills
-- [ ] **Skills marketplace** — browse and install community skills from [skills.sh](https://skills.sh)
-- [ ] **Skill versioning** — pin skill versions, auto-update with changelogs
-- [ ] **Skill templates** — scaffolding for common patterns (blog pipeline, support inbox, etc.)
+- [ ] Plugin system — installable plugins for common integrations (Stripe, Linear, GitHub)
+- [ ] REST API auth — API keys for secure remote access
+- [ ] Multi-user support — team access with roles and permissions
+- [ ] Docker image — one-command deployment with `docker run`
 
 Want to suggest a feature? [Open an issue](https://github.com/hristo2612/jinn/issues).
 

@@ -1,5 +1,63 @@
 # Changelog
 
+## [Unreleased] — lain branch
+
+### ✨ Features — Workflow Engine _(experimental)_
+- **Visual workflow editor** — React Flow based, drag-and-drop nodes with live preview
+- **12 node types** — TRIGGER, AGENT, CONDITION, NOTIFY, MOVE_CARD, WAIT, HTTP, SET_VAR, TRANSFORM, LOG, DONE, WAIT_FOR_HUMAN
+- **4 trigger types** — manual, cron (node-cron), webhook (HMAC signature), kanban events (card_added, card_moved)
+- **Workflow AI Assistant** — chat bubble that generates runnable workflows from natural language
+- **Templates gallery** — simple-agent, review-pipeline, cron-brief, discord-notify
+- **No-code forms** — visual condition builder, smart dropdowns, presets, help tooltips for all node types
+- **FR/EN i18n** — full translation coverage for workflow module
+- **Workflow run history** — per-run status, step logs, live execution view
+- **Discord mode** — send/notify nodes with Discord-specific templates
+- **Mode Registry** — extensible mode system for domain-specific node palettes
+
+### ✨ Features — Hermes Integration
+- **WebAPI-first transport** — SSE streaming directly to Hermes port 8642, no CLI spawn for active sessions
+- **Hermes sessions page** — list, search, filter by source, stats bar, CSV export
+- **Hermes memory page** — inline edit, diff-preview delete, import/export MEMORY.md, auto-save
+- **Hermes skills page** — category grid, search, skill detail modal
+- **HermesActivityWidget** — last 5 sessions widget in dashboard
+- **Per-employee profile wiring** — `--profile`, `--toolsets`, `--skills`, `--provider` all effective
+- **hermesRuntimeMeta badges** — model, provider, honcho status, profile surfaced in session views
+- **Unified cron store** — Hermes jobs + Jinn-native jobs in single API (`~/.hermes/cron/jobs.json`)
+- **COO persona** — `portal.hermesProfile` wires identity for all Jinn gateway sessions
+- **LACP bypass** — `hermes.native` resolution bypasses LACP TTY wrapper in non-interactive spawns
+
+### ✨ Features — Org System
+- **Hermes profile section** — view and edit Hermes profile inline in employee detail
+- **New Agent wizard** — 3-step modal: name, engine, Hermes profile (create + auto-scaffold)
+- **Cross-department service routing** — request services from other departments inline
+- **COO from portal config** — synthetic COO employee from `portal.hermesProfile`
+- **Employee CRUD** — POST/DELETE/PATCH for full employee lifecycle from dashboard
+- **Hermes profile filesystem CRUD** — `GET/PATCH/POST/DELETE /api/hermes/profiles/:name`
+
+### ✨ Features — Kanban & Boards
+- **Multi-board Kanban** — per-department boards + custom boards, isolated state per board
+- **Boards REST API** — full CRUD for boards, columns, cards + drag-and-drop reorder
+- **Gateway event bus** — `board:card_moved` and `board:card_added` events for workflow triggers
+
+### ✨ Features — Cost Analytics
+- **`/costs` page** — total spend summary + by-employee + by-department breakdowns
+- **Hermes cost integration** — reads `state.db` directly (readonly, graceful degradation)
+- **Budget enforcement** — per-employee budget caps in config
+
+### 🔧 Fixes
+- **MCP resolver** — fixed corrupted `apiKey` resolution for `mcp.search`; fixed `gateway-server.js` path (was producing `dist/dist` double)
+- **Queue real-time updates** — `queue:updated` WS events now emitted when task starts and completes (UI no longer stuck on "queued")
+- **Session recovery after restart** — WS reconnect forces session list refetch; `queue:updated` invalidates React Query cache
+- **Employee YAML engine resolution** — `POST /api/sessions` now reads engine/model from employee YAML correctly
+- **Hermes WebAPI SSE** — `currentEvent` now persists across SSE chunk boundaries (fixed fragmentation bug)
+- **Workflow editor** — fixed edge source/target alignment, position undefined guard, useSearchParams SSR wrapping
+
+### 🧪 Tests Added
+- MCP resolver (17 tests) — search apiKey, gateway path, browser/fetch, employee permissions
+- Workflow engine (73 tests) — engine, registry, nodes, runner
+- HermesEngine WebAPI transport — isAvailable, createSession, SSE chat, runViaWebAPI
+- E2E suite — smoke UI + API/Hermes consistency + engine routing
+
 ## [0.7.0] - 2026-03-19
 
 ### ✨ Features — Project Phoenix
