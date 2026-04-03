@@ -160,10 +160,16 @@ function dispatchWebSessionRun(
   context: ApiContext,
   opts?: { delayMs?: number; queueItemId?: string; attachments?: string[] },
 ): void {
+  const sessionKey = session.sessionKey || session.sourceRef;
   const run = async () => {
-    await context.sessionManager.getQueue().enqueue(session.sessionKey || session.sourceRef, async () => {
+    await context.sessionManager.getQueue().enqueue(sessionKey, async () => {
+      // Emit queue:updated when the task actually starts (pending → running)
+      // so the UI QueuePanel removes it from the displayed list immediately.
+      context.emit("queue:updated", { sessionId: session.id, sessionKey });
       context.emit("session:started", { sessionId: session.id });
       await runWebSession(session, prompt, engine, config, context, opts?.attachments);
+      // Emit queue:updated when the task completes (running → done)
+      context.emit("queue:updated", { sessionId: session.id, sessionKey });
     }, opts?.queueItemId);
   };
 
