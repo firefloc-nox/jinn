@@ -18,6 +18,8 @@ export interface StreamDelta {
   toolName?: string;
   toolId?: string;
   toolArgs?: Record<string, unknown>;
+  /** Result content for tool_result events (preview of the tool output) */
+  resultContent?: string;
   timestamp?: number;
 }
 

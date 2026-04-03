@@ -2871,6 +2871,10 @@ async function runWebSession(
             type: delta.type,
             content: delta.content,
             toolName: delta.toolName,
+            toolArgs: delta.toolArgs,
+            toolId: delta.toolId,
+            resultContent: delta.resultContent,
+            timestamp: delta.timestamp ?? now,
           });
         } catch (err) {
           logger.warn(`Failed to emit stream delta for session ${currentSession.id}: ${err instanceof Error ? err.message : err}`);
@@ -2885,7 +2889,7 @@ async function runWebSession(
               toolName: delta.toolName,
               toolArgs: delta.toolArgs,
               content: delta.type === "thinking" ? delta.content : undefined,
-              resultContent: delta.type === "tool_result" ? delta.content : undefined,
+              resultContent: delta.type === "tool_result" ? (delta.resultContent ?? delta.content) : undefined,
               timestamp: now,
             });
             // Trim to 200 events per session to keep the table bounded

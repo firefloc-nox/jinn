@@ -248,6 +248,48 @@ export class HermesWebAPITransport {
                       }
                       break;
                     }
+                    case "thinking.delta": {
+                      // Hermes extended thinking — surface to activity panel
+                      const thinkingDelta = data["delta"];
+                      if (typeof thinkingDelta === "string" && thinkingDelta) {
+                        onDelta?.({ type: "thinking", content: thinkingDelta, timestamp: Date.now() });
+                      }
+                      break;
+                    }
+                    case "tool.started": {
+                      // { tool_name, preview, args } — emit tool_use so activity panel shows it
+                      const toolName = typeof data["tool_name"] === "string" ? data["tool_name"] : "unknown";
+                      const toolArgs = data["args"] as Record<string, unknown> | undefined;
+                      onDelta?.({
+                        type: "tool_use",
+                        content: "",
+                        toolName,
+                        toolArgs,
+                        timestamp: Date.now(),
+                      });
+                      break;
+                    }
+                    case "tool.completed":
+                    case "tool.failed": {
+                      // { tool_call_id, tool_name, args, result_preview }
+                      const toolName = typeof data["tool_name"] === "string" ? data["tool_name"] : "unknown";
+                      const toolId = typeof data["tool_call_id"] === "string" ? data["tool_call_id"] : undefined;
+                      const resultPreview = typeof data["result_preview"] === "string" ? data["result_preview"] : "";
+                      const toolArgs = data["args"] as Record<string, unknown> | undefined;
+                      onDelta?.({
+                        type: "tool_result",
+                        content: "",
+                        toolName,
+                        toolId,
+                        toolArgs,
+                        resultContent: resultPreview.slice(0, 500), // cap — full result in DB
+                        timestamp: Date.now(),
+                      });
+                      break;
+                    }
+                    case "tool.pending":
+                      // Precursor to tool.started — skip to avoid duplicate UI entries
+                      break;
                     case "run.completed":
                       apiCalls = typeof data["api_calls"] === "number" ? data["api_calls"] : 0;
                       completed = data["completed"] === true;
@@ -265,8 +307,8 @@ export class HermesWebAPITransport {
                       done = true;
                       break;
                     default:
-                      // tool.pending / tool.started / tool.completed / tool.failed / memory.updated / etc.
-                      // Pas d'action nécessaire côté Jinn pour l'instant
+                      // memory.updated, session.created, run.started, message.started, etc.
+                      // No action needed for these events
                       break;
                   }
                   currentEvent = "";
