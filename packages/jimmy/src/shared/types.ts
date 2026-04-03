@@ -1,4 +1,4 @@
-export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "status" | "error";
+export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "thinking" | "status" | "error";
 
 /** Known engine identifiers. Open string allows future engines without breaking existing callers. */
 export type EngineType = "hermes" | "claude" | "codex" | "gemini" | (string & {});
@@ -17,6 +17,8 @@ export interface StreamDelta {
   content: string;
   toolName?: string;
   toolId?: string;
+  toolArgs?: Record<string, unknown>;
+  timestamp?: number;
 }
 
 export interface Engine {

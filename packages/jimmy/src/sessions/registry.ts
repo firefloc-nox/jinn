@@ -186,6 +186,22 @@ export function initDb(): Database.Database {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      content TEXT,
+      tool_name TEXT,
+      tool_args TEXT,
+      thinking_text TEXT,
+      result_content TEXT,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_events_session
+      ON session_events (session_id, timestamp);
+  `);
+
   return db;
 }
 
@@ -681,4 +697,74 @@ export function deleteFile(id: string): boolean {
   const db = initDb();
   const result = db.prepare('DELETE FROM files WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+// ── Session events (activity panel — tool calls, thinking, text) ──────
+
+export interface SessionEvent {
+  id: string;
+  sessionId: string;
+  type: string;
+  content: string | null;
+  toolName: string | null;
+  toolArgs: Record<string, unknown> | null;
+  thinkingText: string | null;
+  resultContent: string | null;
+  timestamp: number;
+}
+
+export function insertSessionEvent(event: {
+  sessionId: string;
+  type: string;
+  content?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  thinkingText?: string;
+  resultContent?: string;
+  timestamp: number;
+}): void {
+  const db = initDb();
+  const id = uuidv4();
+  db.prepare(
+    'INSERT INTO session_events (id, session_id, type, content, tool_name, tool_args, thinking_text, result_content, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    id,
+    event.sessionId,
+    event.type,
+    event.content ?? null,
+    event.toolName ?? null,
+    event.toolArgs ? JSON.stringify(event.toolArgs) : null,
+    event.thinkingText ?? null,
+    event.resultContent ?? null,
+    event.timestamp,
+  );
+}
+
+/** Delete oldest events beyond the per-session cap. */
+export function trimSessionEvents(sessionId: string, maxPerSession: number): void {
+  if (maxPerSession <= 0) return;
+  const db = initDb();
+  db.prepare(`
+    DELETE FROM session_events WHERE session_id = ? AND id NOT IN (
+      SELECT id FROM session_events WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?
+    )
+  `).run(sessionId, sessionId, maxPerSession);
+}
+
+export function getSessionEvents(sessionId: string): SessionEvent[] {
+  const db = initDb();
+  const rows = db.prepare(
+    'SELECT id, session_id, type, content, tool_name, tool_args, thinking_text, result_content, timestamp FROM session_events WHERE session_id = ? ORDER BY timestamp ASC',
+  ).all(sessionId) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    type: row.type as string,
+    content: (row.content as string) ?? null,
+    toolName: (row.tool_name as string) ?? null,
+    toolArgs: row.tool_args ? (JSON.parse(row.tool_args as string) as Record<string, unknown>) : null,
+    thinkingText: (row.thinking_text as string) ?? null,
+    resultContent: (row.result_content as string) ?? null,
+    timestamp: row.timestamp as number,
+  }));
 }

@@ -16,7 +16,9 @@ import { useSettings } from '@/app/settings-provider'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
-import { Check, Copy, EllipsisVertical, Trash2 } from 'lucide-react'
+import { Activity, Check, Copy, EllipsisVertical, Trash2 } from 'lucide-react'
+import { SessionActivityPanel } from '@/components/activity/session-activity-panel'
+import { useSessionActivity } from '@/hooks/use-session-activity'
 
 function getOnboardingPrompt(portalName: string, userMessage: string) {
   return `This is your first time being activated. The user just set up ${portalName} and opened the web dashboard for the first time.
@@ -111,6 +113,8 @@ function ChatPage() {
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const sessionPickerRef = useRef<HTMLDivElement>(null)
   const { events, connectionSeq, skillsVersion, subscribe } = useGateway()
+  const [showActivity, setShowActivity] = useState(false)
+  const { events: activityEvents, sessionStatus: activityStatus } = useSessionActivity({ sessionId: selectedId, subscribe })
   const chatTabs = useChatTabs()
   const searchParams = useSearchParams()
   const onboardingTriggered = useRef(false)
@@ -468,6 +472,22 @@ function ChatPage() {
         </div>
       )}
 
+      {selectedId && (
+        <button
+          onClick={() => setShowActivity(v => !v)}
+          title="Toggle activity panel (tool calls, thinking)"
+          className={cn(
+            "hidden lg:flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all",
+            showActivity
+              ? "bg-[var(--accent)] text-white"
+              : "bg-[var(--fill-tertiary)] text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Activity className="size-3" />
+          Activity
+        </button>
+      )}
+
       <div className="hidden lg:block">{moreMenu}</div>
 
       {copiedField && (
@@ -533,7 +553,7 @@ function ChatPage() {
           </div>
 
           <div className={cn(
-            "flex-1 overflow-hidden flex flex-col",
+            "flex-1 overflow-hidden flex flex-col relative",
             mobileView === 'sidebar' ? 'hidden lg:flex' : 'flex'
           )}>
             <ChatPane
@@ -555,6 +575,16 @@ function ChatPage() {
               focusTrigger={focusTrigger}
               onShortcutsClick={() => setShowShortcutOverlay(true)}
             />
+            {/* Activity Panel — toggle with Activity button in toolbar */}
+            {showActivity && selectedId && (
+              <SessionActivityPanel
+                events={activityEvents}
+                sessionTitle={sessionMeta?.title ?? undefined}
+                sessionStatus={activityStatus}
+                connected={true}
+                onClose={() => setShowActivity(false)}
+              />
+            )}
           </div>
         </div>
       </div>

@@ -28,6 +28,9 @@ import {
   listAllPendingQueueItems,
   getFile,
   accumulateSessionCost,
+  insertSessionEvent,
+  getSessionEvents,
+  trimSessionEvents,
 } from "../sessions/registry.js";
 import { forkEngineSession } from "../sessions/fork.js";
 import {
@@ -737,6 +740,15 @@ export async function handleApiRequest(
       if (!session) return notFound(res);
       const items = getQueueItems(session.sessionKey || session.sourceRef || session.id);
       return json(res, items);
+    }
+
+    // GET /api/sessions/:id/events — activity panel (tool calls, thinking, text)
+    params = matchRoute("/api/sessions/:id/events", pathname);
+    if (method === "GET" && params) {
+      const session = getSession(params.id);
+      if (!session) return notFound(res);
+      const events = getSessionEvents(params.id);
+      return json(res, { sessionId: params.id, events });
     }
 
     // DELETE /api/sessions/:id/queue — clear all pending
@@ -2862,6 +2874,25 @@ async function runWebSession(
           });
         } catch (err) {
           logger.warn(`Failed to emit stream delta for session ${currentSession.id}: ${err instanceof Error ? err.message : err}`);
+        }
+        // Persist tool_use, tool_result, and thinking events for activity panel replay.
+        // Text deltas are skipped — too verbose and visible directly in the chat.
+        try {
+          if (delta.type === "tool_use" || delta.type === "tool_result" || delta.type === "thinking") {
+            insertSessionEvent({
+              sessionId: currentSession.id,
+              type: delta.type,
+              toolName: delta.toolName,
+              toolArgs: delta.toolArgs,
+              content: delta.type === "thinking" ? delta.content : undefined,
+              resultContent: delta.type === "tool_result" ? delta.content : undefined,
+              timestamp: now,
+            });
+            // Trim to 200 events per session to keep the table bounded
+            trimSessionEvents(currentSession.id, 200);
+          }
+        } catch {
+          // Non-fatal — activity panel is best-effort
         }
       },
     }).finally(() => {
