@@ -73,7 +73,7 @@ function buildAvailableServers(config: McpGlobalConfig): Record<string, McpServe
 
   // Web search via Brave
   if (config.search?.enabled) {
-    const apiKey = resolveEnvVar(config.search.apiKey);
+    const apiKey = resolveEnvVar(config.search.apiKey) ?? process.env.BRAVE_API_KEY;
     if (apiKey) {
       servers.search = {
         command: "npx",
@@ -95,19 +95,23 @@ function buildAvailableServers(config: McpGlobalConfig): Record<string, McpServe
 
   // Gateway MCP server (built-in, always uses the local gateway)
   if (config.gateway?.enabled !== false) {
-    const gatewayMcpPath = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname),
-      "..",
-      "..",
-      "dist",
-      "src",
-      "mcp",
-      "gateway-server.js",
-    );
-    // Only add if the built file exists; otherwise fall back to ts-node path
-    const scriptPath = fs.existsSync(gatewayMcpPath)
-      ? gatewayMcpPath
-      : path.resolve(path.dirname(new URL(import.meta.url).pathname), "gateway-server.js");
+    // Resolve gateway-server.js relative to this file.
+    // When compiled, both resolver.js and gateway-server.js live in dist/src/mcp/.
+    // When running from source (vitest/ts-node), they live in src/mcp/.
+    // In both cases, the sibling path is correct.
+    const thisDir = path.dirname(new URL(import.meta.url).pathname);
+    const siblingPath = path.resolve(thisDir, "gateway-server.js");
+
+    // Fallback: if the sibling .js doesn't exist (e.g. running raw .ts without build),
+    // try the dist/ compiled version relative to the package root.
+    const packageRoot = path.resolve(thisDir, "..", "..", "..");
+    const distPath = path.resolve(packageRoot, "dist", "src", "mcp", "gateway-server.js");
+
+    const scriptPath = fs.existsSync(siblingPath)
+      ? siblingPath
+      : fs.existsSync(distPath)
+        ? distPath
+        : siblingPath; // best-effort fallback
 
     servers.gateway = {
       command: "node",
