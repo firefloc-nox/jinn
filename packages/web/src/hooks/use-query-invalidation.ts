@@ -11,9 +11,10 @@ import { queryKeys } from '@/lib/query-keys'
  */
 export function useQueryInvalidation() {
   const qc = useQueryClient()
-  const { subscribe } = useGateway()
+  const { subscribe, connectionSeq } = useGateway()
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = useRef<Set<string>>(new Set())
+  const isFirstMount = useRef(true)
 
   useEffect(() => {
     const unsub = subscribe((event: string, payload: unknown) => {
@@ -24,6 +25,14 @@ export function useQueryInvalidation() {
           pendingRef.current.add('sessions')
           break
         case 'session:updated':
+          pendingRef.current.add('sessions')
+          if (p?.sessionId) {
+            qc.invalidateQueries({ queryKey: queryKeys.sessions.detail(p.sessionId as string) })
+          }
+          break
+        case 'queue:updated':
+          // Queue state changed (task started, completed, or cleared) — refresh session list
+          // so transportState/queueDepth badge updates immediately in the UI.
           pendingRef.current.add('sessions')
           if (p?.sessionId) {
             qc.invalidateQueries({ queryKey: queryKeys.sessions.detail(p.sessionId as string) })
@@ -77,4 +86,17 @@ export function useQueryInvalidation() {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
   }, [subscribe, qc])
+
+  // On WebSocket reconnect (connectionSeq increments), force-refresh sessions.
+  // This recovers from the case where session:completed was emitted while the
+  // client was disconnected (e.g. gateway restart) — otherwise the UI stays
+  // stuck showing "queued" or "running" indefinitely.
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false
+      return
+    }
+    // connectionSeq > 0 means a reconnection happened
+    qc.invalidateQueries({ queryKey: queryKeys.sessions.all })
+  }, [connectionSeq, qc])
 }
