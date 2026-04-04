@@ -119,6 +119,13 @@ export function NewAgentModal({
         );
       }
 
+      const hermesProfileName =
+        form.engine === "hermes"
+          ? form.createNewProfile
+            ? form.newProfileName
+            : form.hermesProfile || undefined
+          : undefined;
+
       const payload: CreateEmployeeRequest = {
         name: form.name,
         displayName: form.displayName,
@@ -126,13 +133,19 @@ export function NewAgentModal({
         rank: form.rank,
         reportsTo: form.reportsTo || undefined,
         engine: form.engine,
+        runtimeRef: form.engine,
+        profileRef: hermesProfileName
+          ? { runtime: "hermes", name: hermesProfileName }
+          : undefined,
         persona: form.persona || undefined,
-        hermesProfile:
-          form.engine === "hermes"
-            ? form.createNewProfile
-              ? form.newProfileName
-              : form.hermesProfile || undefined
-            : undefined,
+        hermesHooks: form.mcp || form.honcho
+          ? {
+              enabled: true,
+              memory: form.honcho || undefined,
+              mcp: form.mcp || undefined,
+            }
+          : undefined,
+        hermesProfile: hermesProfileName,
         hermesProvider:
           form.engine === "hermes" && form.hermesProvider
             ? form.hermesProvider

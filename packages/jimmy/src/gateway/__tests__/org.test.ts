@@ -84,4 +84,28 @@ alwaysNotify: "yes"
     expect(emp).toBeDefined();
     expect(emp!.alwaysNotify).toBe(true);
   });
+
+  it("parses runtimeRef, profileRef, reasoning and hermesHooks from YAML", () => {
+    writeYaml("platform", "runtime.yaml", `
+name: runtime-agent
+persona: Runtime aware agent
+runtimeRef: hermes:openrouter
+profileRef:
+  runtime: hermes
+  name: openrouter-default
+reasoning: high
+hermesHooks:
+  enabled: true
+  memory: true
+  mcp: false
+`);
+    const registry = scanOrg();
+    const emp = registry.get("runtime-agent");
+    expect(emp).toBeDefined();
+    expect(emp!.runtimeRef).toBe("hermes:openrouter");
+    expect(emp!.profileRef).toEqual({ runtime: "hermes", name: "openrouter-default" });
+    expect(emp!.reasoning).toBe("high");
+    expect(emp!.hermesHooks).toEqual({ enabled: true, memory: true, skills: undefined, mcp: false });
+    expect(emp!.engine).toBe("hermes:openrouter");
+  });
 });

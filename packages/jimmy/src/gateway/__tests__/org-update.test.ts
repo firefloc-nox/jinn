@@ -112,4 +112,25 @@ rank: employee
     expect(data.rank).toBe("employee");
     expect(data.persona).toBe("Original persona");
   });
+
+  it("writes runtimeRef, profileRef, reasoning and hermesHooks", () => {
+    writeYaml("platform", "runtime.yaml", `
+name: runtime-agent
+persona: Original persona
+engine: hermes
+`);
+
+    updateEmployeeYaml("runtime-agent", {
+      runtimeRef: "hermes:ollama",
+      profileRef: { runtime: "hermes", name: "ollama-local" },
+      reasoning: "high",
+      hermesHooks: { enabled: true, memory: true, mcp: true },
+    });
+
+    const data = readYaml("platform", "runtime.yaml");
+    expect(data.runtimeRef).toBe("hermes:ollama");
+    expect(data.profileRef).toEqual({ runtime: "hermes", name: "ollama-local" });
+    expect(data.reasoning).toBe("high");
+    expect(data.hermesHooks).toEqual({ enabled: true, memory: true, mcp: true });
+  });
 });
