@@ -1268,11 +1268,16 @@ export async function handleApiRequest(
       const config = context.getConfig();
       const portalName = config.portal?.portalName || "Jinn";
       const cooHermesProfile = config.portal?.hermesProfile || undefined;
+      const cooRuntimeRef = config.portal?.runtimeRef || "hermes";
+      const cooProfileRef = config.portal?.profileRef
+        ?? (cooHermesProfile ? { runtime: "hermes", name: cooHermesProfile } : undefined);
       const coo = {
         name: portalName.toLowerCase().replace(/\s+/g, "-"),
         displayName: portalName,
         rank: "executive" as const,
-        engine: "hermes",
+        engine: cooRuntimeRef,
+        runtimeRef: cooRuntimeRef,
+        profileRef: cooProfileRef,
         hermesProfile: cooHermesProfile,
         persona: "COO and AI gateway orchestrator",
       };
@@ -1303,12 +1308,19 @@ export async function handleApiRequest(
         const portalName = cfg.portal?.portalName || "Jinn";
         const cooName = portalName.toLowerCase().replace(/\s+/g, "-");
         if (params.name === cooName) {
+          const cooHermesProfile = cfg.portal?.hermesProfile || undefined;
+          const cooRuntimeRef = cfg.portal?.runtimeRef || "hermes";
+          const cooProfileRef = cfg.portal?.profileRef
+            ?? (cooHermesProfile ? { runtime: "hermes", name: cooHermesProfile } : undefined);
           emp = {
             name: cooName,
             displayName: portalName,
+            department: "executive",
             rank: "executive",
-            engine: "hermes",
-            hermesProfile: cfg.portal?.hermesProfile || undefined,
+            engine: cooRuntimeRef,
+            runtimeRef: cooRuntimeRef,
+            profileRef: cooProfileRef,
+            hermesProfile: cooHermesProfile,
             persona: "COO and AI gateway orchestrator",
           } as any;
         }

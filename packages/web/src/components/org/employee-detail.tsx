@@ -60,12 +60,18 @@ const engineStyles: Record<string, string> = {
 
 function EngineChip({
   engine,
+  runtimeRef,
+  profileName,
   hermesProfile,
 }: {
   engine: string;
+  runtimeRef?: string;
+  profileName?: string;
   hermesProfile?: string;
 }) {
-  const key = (engine || "").toLowerCase();
+  const runtimeLabel = runtimeRef || engine || "hermes";
+  const resolvedProfile = profileName || hermesProfile;
+  const key = (runtimeLabel || "").split(":")[0].toLowerCase();
   const styleClass =
     engineStyles[key] ??
     "border-[var(--separator)] text-[var(--text-secondary)]";
@@ -76,14 +82,14 @@ function EngineChip({
         variant="outline"
         className={`px-2.5 py-1 text-[length:var(--text-caption2)] font-[var(--weight-semibold)] ${styleClass}`}
       >
-        {engine || "hermes"}
+        {runtimeLabel}
       </Badge>
-      {hermesProfile && (
+      {resolvedProfile && (
         <Badge
           variant="outline"
           className="border-[var(--separator)] text-[var(--text-secondary)] px-2.5 py-1 text-[length:var(--text-caption2)]"
         >
-          {hermesProfile}
+          {resolvedProfile}
         </Badge>
       )}
     </div>
@@ -439,6 +445,8 @@ export function EmployeeDetail({
             </p>
             <EngineChip
               engine={employee.engine || "hermes"}
+              runtimeRef={employee.runtimeRef}
+              profileName={employee.profileRef?.name}
               hermesProfile={employee.hermesProfile}
             />
           </div>
