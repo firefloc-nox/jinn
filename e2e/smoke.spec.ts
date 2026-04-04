@@ -195,6 +195,24 @@ test.describe('Hermes Skills Page', () => {
   })
 })
 
+// ─── Org / Agent Runtime UI ───────────────────────────────────────────────────
+
+test.describe('Org', () => {
+  test('new agent modal surfaces runtime vocabulary and Hermes variants', async ({ page }) => {
+    const resp = await page.goto('/org')
+    expect(resp?.status()).not.toBe(500)
+    expect(resp?.status()).not.toBe(404)
+
+    await page.getByRole('button', { name: /new agent/i }).click()
+    await expect(page.getByText('New Agent').first()).toBeVisible()
+    await page.getByPlaceholder('My Agent').fill('Runtime QA Agent')
+    await page.getByRole('button', { name: 'Next' }).click()
+    await expect(page.getByText('Runtime').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /hermes:openrouter/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /hermes:ollama/i })).toBeVisible()
+  })
+})
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 test.describe('Settings', () => {

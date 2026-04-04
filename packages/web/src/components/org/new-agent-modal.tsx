@@ -4,9 +4,16 @@ import { api } from "@/lib/api";
 import type { Employee, CreateEmployeeRequest } from "@/lib/api";
 
 const RANKS = ["employee", "senior", "manager", "executive"] as const;
-const ENGINES = ["hermes", "claude", "codex"] as const;
-const FALLBACK_ENGINES = ["claude", "codex", "none"] as const;
-const PROVIDERS = ["anthropic", "openai", "openrouter", "auto"] as const;
+const RUNTIME_OPTIONS = [
+  { value: "hermes", label: "hermes", description: "Hermes default runtime" },
+  { value: "hermes:openrouter", label: "hermes:openrouter", description: "Hermes via OpenRouter" },
+  { value: "hermes:ollama", label: "hermes:ollama", description: "Hermes via Ollama/local" },
+  { value: "claude", label: "claude", description: "Native Claude CLI" },
+  { value: "codex", label: "codex", description: "Native Codex CLI" },
+  { value: "gemini", label: "gemini", description: "Native Gemini CLI" },
+] as const;
+const FALLBACK_RUNTIMES = ["claude", "codex", "gemini", "hermes", "hermes:openrouter", "hermes:ollama", "none"] as const;
+const PROVIDERS = ["anthropic", "openai", "openrouter", "ollama", "auto"] as const;
 
 function slugify(v: string) {
   return v
@@ -16,6 +23,8 @@ function slugify(v: string) {
     .replace(/^-|-$/g, "");
 }
 
+type RuntimeOption = (typeof RUNTIME_OPTIONS)[number]["value"];
+
 interface FormState {
   // Step 1
   name: string;
@@ -24,7 +33,7 @@ interface FormState {
   rank: (typeof RANKS)[number];
   reportsTo: string;
   // Step 2
-  engine: (typeof ENGINES)[number];
+  runtimeRef: RuntimeOption;
   hermesProfile: string;
   createNewProfile: boolean;
   newProfileName: string;
@@ -33,7 +42,7 @@ interface FormState {
   hermesProvider: string;
   // Step 3
   persona: string;
-  fallbackEngine: (typeof FALLBACK_ENGINES)[number];
+  fallbackRuntime: (typeof FALLBACK_RUNTIMES)[number];
   mcp: boolean;
   honcho: boolean;
 }
@@ -44,7 +53,7 @@ const INITIAL: FormState = {
   department: "",
   rank: "employee",
   reportsTo: "",
-  engine: "hermes",
+  runtimeRef: "hermes",
   hermesProfile: "",
   createNewProfile: false,
   newProfileName: "",
@@ -52,7 +61,7 @@ const INITIAL: FormState = {
   cloneFrom: "",
   hermesProvider: "",
   persona: "",
-  fallbackEngine: "none",
+  fallbackRuntime: "none",
   mcp: false,
   honcho: false,
 };
@@ -98,7 +107,7 @@ export function NewAgentModal({
   function canNext(): boolean {
     if (step === 1) return form.name.length > 0 && form.displayName.length > 0;
     if (step === 2) {
-      if (form.engine === "hermes") {
+      if (form.runtimeRef.startsWith("hermes")) {
         if (form.createNewProfile) return form.newProfileName.length > 0;
         return true; // hermesProfile optional
       }
@@ -107,12 +116,16 @@ export function NewAgentModal({
     return true;
   }
 
+  function getExecutorFromRuntimeRef(runtimeRef: RuntimeOption): string {
+    return runtimeRef.split(":")[0] || runtimeRef;
+  }
+
   async function handleSubmit() {
     setSubmitting(true);
     setSubmitError(null);
     try {
       // If creating a new Hermes profile
-      if (form.engine === "hermes" && form.createNewProfile && form.newProfileName) {
+      if (form.runtimeRef.startsWith("hermes") && form.createNewProfile && form.newProfileName) {
         await api.createHermesProfile(
           form.newProfileName,
           form.cloneProfile && form.cloneFrom ? form.cloneFrom : undefined,
@@ -120,7 +133,7 @@ export function NewAgentModal({
       }
 
       const hermesProfileName =
-        form.engine === "hermes"
+        form.runtimeRef.startsWith("hermes")
           ? form.createNewProfile
             ? form.newProfileName
             : form.hermesProfile || undefined
@@ -132,8 +145,8 @@ export function NewAgentModal({
         department: form.department || undefined,
         rank: form.rank,
         reportsTo: form.reportsTo || undefined,
-        engine: form.engine,
-        runtimeRef: form.engine,
+        engine: getExecutorFromRuntimeRef(form.runtimeRef),
+        runtimeRef: form.runtimeRef,
         profileRef: hermesProfileName
           ? { runtime: "hermes", name: hermesProfileName }
           : undefined,
@@ -147,11 +160,13 @@ export function NewAgentModal({
           : undefined,
         hermesProfile: hermesProfileName,
         hermesProvider:
-          form.engine === "hermes" && form.hermesProvider
+          form.runtimeRef.startsWith("hermes") && form.hermesProvider
             ? form.hermesProvider
             : undefined,
         fallbackEngine:
-          form.fallbackEngine !== "none" ? form.fallbackEngine : undefined,
+          form.fallbackRuntime !== "none" ? getExecutorFromRuntimeRef(form.fallbackRuntime as RuntimeOption) : undefined,
+        fallbackRuntimes:
+          form.fallbackRuntime !== "none" ? [form.fallbackRuntime] : undefined,
         mcp: form.mcp || undefined,
         honcho: form.honcho || undefined,
       };
@@ -330,19 +345,20 @@ export function NewAgentModal({
               <div>
                 <label className={labelClass}>Runtime</label>
                 <div className="flex gap-[var(--space-2)]">
-                  {ENGINES.map((e) => (
+                  {RUNTIME_OPTIONS.map((option) => (
                     <button
-                      key={e}
+                      key={option.value}
                       type="button"
-                      onClick={() => setField("engine", e)}
+                      onClick={() => setField("runtimeRef", option.value)}
                       className={`flex-1 py-[var(--space-2)] px-[var(--space-3)] rounded-[var(--radius-sm,6px)] border text-[length:var(--text-caption1)] font-[var(--weight-semibold)] cursor-pointer transition-colors ${
-                        form.engine === e
+                        form.runtimeRef === option.value
                           ? "bg-[var(--accent)] text-[var(--accent-contrast,white)] border-[var(--accent)]"
                           : "bg-transparent text-[var(--text-secondary)] border-[var(--separator)] hover:border-[var(--accent)]"
                       }`}
+                      title={option.description}
                     >
-                      {e}
-                      {e === "hermes" && (
+                      {option.label}
+                      {option.value.startsWith("hermes") && (
                         <span className="ml-1 text-[length:var(--text-caption2)] opacity-70">
                           ★
                         </span>
@@ -352,7 +368,7 @@ export function NewAgentModal({
                 </div>
               </div>
 
-              {form.engine === "hermes" && (
+              {form.runtimeRef.startsWith("hermes") && (
                 <>
                   <div>
                     <label className={labelClass}>Hermes Profile</label>
@@ -467,15 +483,15 @@ export function NewAgentModal({
                 <label className={labelClass}>Fallback Runtime</label>
                 <select
                   className={inputClass}
-                  value={form.fallbackEngine}
+                  value={form.fallbackRuntime}
                   onChange={(e) =>
                     setField(
-                      "fallbackEngine",
-                      e.target.value as FormState["fallbackEngine"],
+                      "fallbackRuntime",
+                      e.target.value as FormState["fallbackRuntime"],
                     )
                   }
                 >
-                  {FALLBACK_ENGINES.map((f) => (
+                  {FALLBACK_RUNTIMES.map((f) => (
                     <option key={f} value={f}>
                       {f}
                     </option>
