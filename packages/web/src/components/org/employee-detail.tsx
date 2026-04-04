@@ -130,10 +130,13 @@ export function EmployeeDetail({
   name,
   prefetched,
   allEmployees,
+  onUpdate,
 }: {
   name: string;
   prefetched?: Employee;
   allEmployees?: Employee[];
+  /** Called after a successful save so the parent can sync its employee list */
+  onUpdate?: (employee: Employee) => void;
 }) {
   const [employee, setEmployee] = useState<Employee | null>(prefetched ?? null);
   const [sessions, setSessions] = useState<SessionData[]>([]);
@@ -281,6 +284,7 @@ export function EmployeeDetail({
       });
       setEditing(false);
       setEditState(null);
+      onUpdate?.(updated); // notify parent so org list stays in sync
     } catch (err) {
       setEmployee(prev); // rollback
       setSaveError(err instanceof Error ? err.message : "Save failed");

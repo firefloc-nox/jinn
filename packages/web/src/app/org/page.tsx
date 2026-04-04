@@ -242,6 +242,10 @@ export default function OrgPage() {
                   name={selected.name}
                   prefetched={selected.rank === "executive" ? selected : undefined}
                   allEmployees={employees}
+                  onUpdate={(updated) => {
+                    setEmployees((prev) => prev.map((e) => (e.name === updated.name ? updated : e)));
+                    setSelected((prev) => (prev?.name === updated.name ? updated : prev));
+                  }}
                 />
               </div>
             </div>
