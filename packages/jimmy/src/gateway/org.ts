@@ -286,7 +286,7 @@ export function updateEmployeeYaml(
     if (updates.hermesHooks !== undefined) {
       if (updates.hermesHooks === null) {
         delete data.hermesHooks;
-        delete data.hermesProfile; // honcho: legacy compat: also clear honcho when hooks are cleared
+        delete data.honcho; // honcho: legacy compat — also clear honcho when hooks are cleared
       } else {
         data.hermesHooks = updates.hermesHooks;
         // Sync honcho legacy field bidirectionally with hermesHooks.memory
@@ -407,7 +407,11 @@ export function createEmployeeYaml(input: CreateEmployeeInput): string {
   if (input.model) data.model = input.model;
   if (input.reasoning) data.reasoning = input.reasoning;
   if (input.fallbackEngine) data.fallbackEngine = input.fallbackEngine;
-  if (input.fallbackRuntimes?.length) data.fallbackRuntimes = input.fallbackRuntimes;
+  if (input.fallbackRuntimes?.length) {
+    // Defensive: filter to valid RuntimeRef strings only
+    const filtered = input.fallbackRuntimes.filter((r): r is string => typeof r === "string");
+    if (filtered.length) data.fallbackRuntimes = filtered;
+  }
   if (input.emoji) data.emoji = input.emoji;
   if (typeof input.alwaysNotify === "boolean") data.alwaysNotify = input.alwaysNotify;
   if (input.mcp !== undefined) data.mcp = input.mcp;
