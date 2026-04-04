@@ -280,7 +280,7 @@ export function EmployeeDetail({
         fallbackRuntimes: editState.fallbackRuntimes,
         hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp || editState.hermesHooks.skills
           ? { enabled: true, ...editState.hermesHooks }
-          : undefined,
+          : null,
       });
       setEditing(false);
       setEditState(null);

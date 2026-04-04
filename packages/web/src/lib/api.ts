@@ -304,7 +304,10 @@ export const api = {
   getEmployee: (name: string) => get<Employee>(`/api/org/employees/${name}`),
   createEmployee: (data: CreateEmployeeRequest) =>
     post<Employee>("/api/org/employees", data),
-  updateEmployee: (name: string, data: Partial<Employee> & { alwaysNotify?: boolean }) =>
+  updateEmployee: (
+    name: string,
+    data: Omit<Partial<Employee>, "hermesHooks"> & { hermesHooks?: HermesHooks | null; alwaysNotify?: boolean },
+  ) =>
     patch<{ status: string }>(`/api/org/employees/${name}`, data),
   deleteEmployee: (name: string, deleteHermesProfile?: boolean) =>
     del<{ status: string }>(`/api/org/employees/${name}${deleteHermesProfile ? "?deleteHermesProfile=true" : ""}`),
