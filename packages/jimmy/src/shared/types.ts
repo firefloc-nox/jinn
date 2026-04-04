@@ -1,15 +1,40 @@
 export type StreamDeltaType = "text" | "text_snapshot" | "tool_use" | "tool_result" | "thinking" | "status" | "error";
 
-/** Known engine identifiers. Open string allows future engines without breaking existing callers. */
-export type EngineType = "hermes" | "claude" | "codex" | "gemini" | (string & {});
+/** Known runtime identifiers. Open string allows future runtimes without breaking existing callers. */
+export type RuntimeKind = "hermes" | "claude" | "codex" | "gemini" | (string & {});
+
+/** @deprecated Legacy alias kept during the bus-not-brain migration. Prefer RuntimeKind/RuntimeRef. */
+export type EngineType = RuntimeKind;
 
 /**
- * Brain policy — declares the primary brain and ordered fallback chain.
- * Intended for future use when a session can declare its own fallback policy.
+ * Canonical logical runtime reference used for routing, fallback chains, and persistence.
+ * Examples: `claude`, `codex`, `hermes`, `hermes:openrouter`, `hermes:ollama`.
+ */
+export type RuntimeRef = string & {};
+
+/**
+ * Reference to a runtime-native profile. The concrete on-disk/config format remains runtime-specific.
+ */
+export interface ProfileRef {
+  runtime: RuntimeKind;
+  name: string;
+}
+
+/** Optional Hermes augmentation that can be applied before spawning any runtime. */
+export interface HermesHooks {
+  enabled: boolean;
+  memory?: boolean;
+  skills?: boolean;
+  mcp?: boolean;
+}
+
+/**
+ * Runtime policy — declares the primary runtime and ordered fallback chain.
+ * `brain` remains as a legacy config alias during migration.
  */
 export interface BrainPolicy {
-  primary: EngineType;
-  fallbacks: EngineType[];
+  primary: RuntimeRef;
+  fallbacks: RuntimeRef[];
 }
 
 export interface StreamDelta {
@@ -300,8 +325,14 @@ export interface Employee {
   displayName: string;
   department: string;
   rank: "executive" | "manager" | "senior" | "employee";
+  /** @deprecated Legacy field kept during migration. Prefer runtimeRef. */
   engine: string;
+  /** Canonical logical runtime reference (ex: `codex`, `hermes:openrouter`). */
+  runtimeRef?: RuntimeRef;
+  /** Runtime-native profile reference; concrete profile format is runtime-specific. */
+  profileRef?: ProfileRef;
   model: string;
+  reasoning?: string;
   persona: string;
   /** Emoji icon for this employee (shown in sidebar, org chart, etc.) */
   emoji?: string;
@@ -319,9 +350,11 @@ export interface Employee {
   reportsTo?: string | string[];
   /** Services this employee provides to the org */
   provides?: ServiceDeclaration[];
-  /** Hermes-specific: named Hermes profile to activate (maps to --profile) */
+  /** Optional Hermes augmentation applied before spawn, regardless of chosen runtime. */
+  hermesHooks?: HermesHooks;
+  /** Hermes-specific: named Hermes profile to activate (maps to --profile). Legacy field during migration to profileRef. */
   hermesProfile?: string;
-  /** Hermes-specific: provider override (maps to --provider) */
+  /** Hermes-specific: provider override (maps to --provider). Legacy field during migration to runtimeRef/profileRef. */
   hermesProvider?: string;
   /** Hermes-specific: comma-separated toolsets to enable (maps to --toolsets) */
   hermesToolsets?: string;
@@ -482,7 +515,11 @@ export interface PortalConfig {
   operatorName?: string;
   language?: string;
   onboarded?: boolean;
-  /** Hermes profile to use for COO sessions (sessions with no employee). */
+  /** Canonical runtime for COO / portal sessions. */
+  runtimeRef?: RuntimeRef;
+  /** Runtime-native profile reference for COO / portal sessions. */
+  profileRef?: ProfileRef;
+  /** Hermes profile to use for COO sessions (sessions with no employee). Legacy field during migration. */
   hermesProfile?: string;
 }
 
@@ -497,13 +534,17 @@ export interface EngineConfig {
 export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
+  /** Canonical routing config for the bus-not-brain model. */
+  routing?: {
+    defaultRuntime?: RuntimeRef;
+    fallbackRuntimes?: RuntimeRef[];
+  };
   /**
-   * Brain fallback policy — declares the primary brain and fallback chain.
-   * When absent, defaults to hermes-first (see DEFAULT_FALLBACK_POLICY in sessions/fallback.ts).
+   * Legacy alias kept during migration. Maps conceptually to routing.defaultRuntime/fallbackRuntimes.
    */
   brain?: import("../sessions/fallback.js").FallbackPolicy;
   engines: {
-    /** Default engine name. Open string — not restricted to known engines. */
+    /** @deprecated Legacy field kept during migration. Prefer routing.defaultRuntime. */
     default: EngineType;
     /**
      * hermes is the primary brain; claude/codex/gemini are fallback engines.

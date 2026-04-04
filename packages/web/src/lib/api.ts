@@ -22,13 +22,30 @@ export interface QueueItem {
   createdAt: string;
 }
 
+export type RuntimeRef = string
+
+export interface ProfileRef {
+  runtime: string
+  name: string
+}
+
+export interface HermesHooks {
+  enabled: boolean
+  memory?: boolean
+  skills?: boolean
+  mcp?: boolean
+}
+
 export interface Employee {
   name: string;
   displayName: string;
   department: string;
   rank: "executive" | "manager" | "senior" | "employee";
   engine: string;
+  runtimeRef?: RuntimeRef;
+  profileRef?: ProfileRef;
   model?: string;
+  reasoning?: string;
   persona: string;
   emoji?: string;
   alwaysNotify?: boolean;
@@ -37,9 +54,11 @@ export interface Employee {
   directReports?: string[];
   depth?: number;
   chain?: string[];
+  hermesHooks?: HermesHooks;
   hermesProfile?: string;
   hermesProvider?: string;
   fallbackEngine?: string;
+  fallbackRuntimes?: RuntimeRef[];
   mcp?: boolean;
   honcho?: boolean;
   provides?: Array<{ name: string; description?: string }>;
@@ -51,11 +70,17 @@ export interface CreateEmployeeRequest {
   department?: string;
   rank: "executive" | "manager" | "senior" | "employee";
   engine?: string;
+  runtimeRef?: RuntimeRef;
+  profileRef?: ProfileRef;
+  model?: string;
+  reasoning?: string;
   persona?: string;
   reportsTo?: string;
+  hermesHooks?: HermesHooks;
   hermesProfile?: string;
   hermesProvider?: string;
   fallbackEngine?: string;
+  fallbackRuntimes?: RuntimeRef[];
   mcp?: boolean;
   honcho?: boolean;
 }
