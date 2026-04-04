@@ -2,8 +2,28 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { ORG_DIR } from "../shared/paths.js";
-import type { Employee } from "../shared/types.js";
+import type { Employee, HermesHooks, ProfileRef, RuntimeRef } from "../shared/types.js";
 import { logger } from "../shared/logger.js";
+
+function parseProfileRef(value: unknown): ProfileRef | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const runtime = (value as Record<string, unknown>).runtime;
+  const name = (value as Record<string, unknown>).name;
+  if (typeof runtime !== "string" || typeof name !== "string") return undefined;
+  return { runtime, name };
+}
+
+function parseHermesHooks(value: unknown): HermesHooks | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const hooks = value as Record<string, unknown>;
+  if (typeof hooks.enabled !== "boolean") return undefined;
+  return {
+    enabled: hooks.enabled,
+    memory: typeof hooks.memory === "boolean" ? hooks.memory : undefined,
+    skills: typeof hooks.skills === "boolean" ? hooks.skills : undefined,
+    mcp: typeof hooks.mcp === "boolean" ? hooks.mcp : undefined,
+  };
+}
 
 export function scanOrg(): Map<string, Employee> {
   const registry = new Map<string, Employee>();
@@ -25,14 +45,18 @@ export function scanOrg(): Map<string, Employee> {
           const raw = fs.readFileSync(fullPath, "utf-8");
           const data = yaml.load(raw) as any;
           if (data && data.name && data.persona) {
+            const runtimeRef = typeof data.runtimeRef === "string" ? data.runtimeRef as RuntimeRef : undefined;
             const employee: Employee = {
               name: data.name,
               displayName: data.displayName || data.name,
               department:
                 data.department || path.basename(path.dirname(fullPath)),
               rank: data.rank || "employee",
-              engine: data.engine || "hermes",
+              engine: data.engine || runtimeRef || "hermes",
+              runtimeRef,
+              profileRef: parseProfileRef(data.profileRef),
               model: data.model || undefined,
+              reasoning: typeof data.reasoning === "string" ? data.reasoning : undefined,
               persona: data.persona,
               emoji: typeof data.emoji === "string" ? data.emoji : undefined,
               cliFlags: Array.isArray(data.cliFlags) ? data.cliFlags : undefined,
@@ -44,6 +68,7 @@ export function scanOrg(): Map<string, Employee> {
                 ? data.provides.filter((s: unknown) => s && typeof s === "object" && typeof (s as any).name === "string" && typeof (s as any).description === "string")
                   .map((s: any) => ({ name: s.name as string, description: s.description as string }))
                 : undefined,
+              hermesHooks: parseHermesHooks(data.hermesHooks),
               hermesProfile: typeof data.hermesProfile === "string" ? data.hermesProfile : undefined,
               hermesProvider: typeof data.hermesProvider === "string" ? data.hermesProvider : undefined,
               hermesToolsets: typeof data.hermesToolsets === "string" ? data.hermesToolsets : undefined,
@@ -106,11 +131,15 @@ export interface UpdateEmployeeFields {
   reportsTo?: string | null;
   persona?: string;
   engine?: string;
+  runtimeRef?: RuntimeRef | null;
+  profileRef?: ProfileRef | null;
   model?: string | null;
+  reasoning?: string | null;
   fallbackEngine?: string | null;
   emoji?: string | null;
   alwaysNotify?: boolean;
   mcp?: boolean | string[] | null;
+  hermesHooks?: HermesHooks | null;
   hermesProfile?: string | null;
   hermesProvider?: string | null;
   hermesToolsets?: string | null;
@@ -157,11 +186,32 @@ export function updateEmployeeYaml(
     if (updates.engine !== undefined) {
       data.engine = updates.engine || undefined;
     }
+    if (updates.runtimeRef !== undefined) {
+      if (updates.runtimeRef === null || updates.runtimeRef === "") {
+        delete data.runtimeRef;
+      } else {
+        data.runtimeRef = updates.runtimeRef;
+      }
+    }
+    if (updates.profileRef !== undefined) {
+      if (updates.profileRef === null) {
+        delete data.profileRef;
+      } else {
+        data.profileRef = updates.profileRef;
+      }
+    }
     if (updates.model !== undefined) {
       if (updates.model === null || updates.model === "") {
         delete data.model;
       } else {
         data.model = updates.model;
+      }
+    }
+    if (updates.reasoning !== undefined) {
+      if (updates.reasoning === null || updates.reasoning === "") {
+        delete data.reasoning;
+      } else {
+        data.reasoning = updates.reasoning;
       }
     }
     if (updates.fallbackEngine !== undefined) {
@@ -186,6 +236,13 @@ export function updateEmployeeYaml(
         delete data.mcp;
       } else {
         data.mcp = updates.mcp;
+      }
+    }
+    if (updates.hermesHooks !== undefined) {
+      if (updates.hermesHooks === null) {
+        delete data.hermesHooks;
+      } else {
+        data.hermesHooks = updates.hermesHooks;
       }
     }
     if (updates.hermesProfile !== undefined) {
@@ -236,11 +293,15 @@ export interface CreateEmployeeInput {
   reportsTo?: string;
   persona: string;
   engine?: string;
+  runtimeRef?: RuntimeRef;
+  profileRef?: ProfileRef;
   model?: string;
+  reasoning?: string;
   fallbackEngine?: string;
   emoji?: string;
   alwaysNotify?: boolean;
   mcp?: boolean | string[];
+  hermesHooks?: HermesHooks;
   hermesProfile?: string;
   hermesProvider?: string;
   hermesToolsets?: string;
@@ -264,15 +325,19 @@ export function createEmployeeYaml(input: CreateEmployeeInput): string {
     department,
     rank: input.rank || "employee",
     persona: input.persona,
-    engine: input.engine || "hermes",
+    engine: input.engine || input.runtimeRef || "hermes",
   };
 
+  if (input.runtimeRef) data.runtimeRef = input.runtimeRef;
+  if (input.profileRef) data.profileRef = input.profileRef;
   if (input.reportsTo) data.reportsTo = input.reportsTo;
   if (input.model) data.model = input.model;
+  if (input.reasoning) data.reasoning = input.reasoning;
   if (input.fallbackEngine) data.fallbackEngine = input.fallbackEngine;
   if (input.emoji) data.emoji = input.emoji;
   if (typeof input.alwaysNotify === "boolean") data.alwaysNotify = input.alwaysNotify;
   if (input.mcp !== undefined) data.mcp = input.mcp;
+  if (input.hermesHooks) data.hermesHooks = input.hermesHooks;
   if (input.hermesProfile) data.hermesProfile = input.hermesProfile;
   if (input.hermesProvider) data.hermesProvider = input.hermesProvider;
   if (input.hermesToolsets) data.hermesToolsets = input.hermesToolsets;
