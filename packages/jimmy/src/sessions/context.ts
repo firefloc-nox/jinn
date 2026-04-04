@@ -57,6 +57,8 @@ export function buildContext(opts: {
   language?: string;
   channelName?: string;
   hierarchy?: import("../shared/types.js").OrgHierarchy;
+  /** Hermes-enriched context from HermesContextService (pre-spawn hooks for non-Hermes runtimes) */
+  hermesEnrichedContext?: string;
 }): string {
   const maxChars = opts.config?.context?.maxChars ?? DEFAULT_MAX_CONTEXT_CHARS;
   const sections: Section[] = [];
@@ -108,6 +110,16 @@ export function buildContext(opts: {
         });
       }
     } catch { /* no CLAUDE.md — skip */ }
+  }
+
+  // ── STANDARD: Hermes Context Enrichment (pre-spawn hooks) ────
+  if (opts.hermesEnrichedContext) {
+    sections.push({
+      tier: Tier.STANDARD,
+      marker: "## Hermes Context Enrichment",
+      content: opts.hermesEnrichedContext,
+      summary: "## Hermes Context Enrichment\n(hooks applied)",
+    });
   }
 
   // ── STANDARD: Self-evolution ────────────────────────────────

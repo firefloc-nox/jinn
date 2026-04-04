@@ -272,6 +272,21 @@ export class SessionManager {
     } catch { /* fallback to filesystem scan in context builder */ }
 
     try {
+      // ── Hermes pre-spawn context enrichment ─────────────────────────────
+      // Apply Hermes hooks (memory, skills, MCP) for non-Hermes runtimes.
+      // Hermes remains a pure runtime when runtimeRef === "hermes".
+      let hermesEnrichedContext = "";
+      if (
+        employee?.hermesHooks?.enabled
+        && resolvedEngine !== "hermes"
+      ) {
+        const { buildHermesEnrichedContext } = await import("../hermes/context-service.js");
+        const { enrichedContext } = await buildHermesEnrichedContext(employee, msg.text, {
+          config: this.config,
+        });
+        hermesEnrichedContext = enrichedContext;
+      }
+
       const systemPrompt = buildContext({
         source: session.source,
         channel: msg.channel,
@@ -283,6 +298,7 @@ export class SessionManager {
         sessionId: session.id,
         channelName: (msg.transportMeta?.channelName as string) || undefined,
         hierarchy,
+        hermesEnrichedContext,
       });
 
       // Resolve engine config for the actual executor.
