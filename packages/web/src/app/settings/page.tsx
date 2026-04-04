@@ -971,7 +971,7 @@ export default function SettingsPage() {
                     placeholder="127.0.0.1"
                   />
                 </FieldRow>
-                <FieldRow label="Default Engine">
+                <FieldRow label="Default Runtime">
                   <SettingsSelect
                     value={config.engines?.default ?? brainSnapshot.primary}
                     onChange={(v) => {
@@ -983,12 +983,12 @@ export default function SettingsPage() {
                 </FieldRow>
               </Section>
 
-              <Section title="Hermes Brain">
+              <Section title="Runtime Routing">
                 <div className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
-                  Choose the primary brain Jinn should route to first, then tune the ordered fallback chain Hermes-first sessions should use when the primary is unavailable.
+                  Choose the default runtime Jinn should route to first, then tune the ordered fallback runtime chain used when the primary runtime is unavailable.
                 </div>
 
-                <FieldRow label="Default Brain">
+                <FieldRow label="Primary Runtime">
                   <SettingsSelect
                     value={brainSnapshot.primary}
                     onChange={handlePrimaryBrainChange}
@@ -998,10 +998,10 @@ export default function SettingsPage() {
 
                 <div className="border-t border-[var(--separator)] mt-[var(--space-3)] pt-[var(--space-3)]">
                   <div className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
-                    Fallback Order
+                    Fallback Runtime Order
                   </div>
                   <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
-                    Enable the brains you want in the fallback chain, then reorder them with the arrow controls.
+                    Enable the runtimes you want in the fallback chain, then reorder them with the arrow controls.
                   </div>
                   <div className="flex flex-col gap-[var(--space-2)]">
                     {availableBrains.filter((brain) => brain !== brainSnapshot.primary).map((brain) => {

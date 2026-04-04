@@ -202,6 +202,8 @@ test.describe('Settings', () => {
     const resp = await page.goto('/settings')
     expect(resp?.status()).not.toBe(500)
     expect(resp?.status()).not.toBe(404)
+    await expect(page.locator('text=Runtime Routing').first()).toBeVisible()
+    await expect(page.locator('text=Primary Runtime').first()).toBeVisible()
   })
 
   test('default brain = hermes dans /api/status', async ({ request }) => {
