@@ -154,11 +154,15 @@ export interface HermesRuntimeMeta {
  * Always present in transportMeta["routingMeta"] after engine.run(), regardless of which executor was used.
  */
 export interface BrainRoutingMeta {
-  /** The requested brain engine (may differ from actualExecutor when fallback triggered) */
+  /** @deprecated Legacy alias kept during migration. Prefer requestedRuntime. */
   requestedBrain: string;
-  /** The engine that actually executed the session */
+  /** Canonical logical runtime requested by routing. */
+  requestedRuntime?: RuntimeRef;
+  /** Canonical logical runtime actually selected after fallback resolution. */
+  resolvedRuntimeRef?: RuntimeRef;
+  /** The native executor that actually executed the session. */
   actualExecutor: string;
-  /** Whether the primary brain was unavailable and a fallback was used */
+  /** Whether the primary runtime was unavailable and a fallback was used */
   fallbackUsed: boolean;
   /** Human-readable reason for the fallback, if applicable */
   fallbackReason?: string;

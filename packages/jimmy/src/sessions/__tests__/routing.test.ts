@@ -262,6 +262,27 @@ describe("SessionManager — Hermes-first routing", () => {
       expect(claudeRun).not.toHaveBeenCalled();
     });
 
+    it("should prefer employee.runtimeRef over employee.engine when creating a new session", async () => {
+      const engines = new Map<string, Engine>([["hermes", hermesEngine]]);
+      const manager = new SessionManager(config, engines);
+      const employee = {
+        name: "builder",
+        displayName: "Builder",
+        department: "engineering",
+        rank: "employee",
+        engine: "claude",
+        runtimeRef: "hermes:openrouter",
+        model: "gpt-5.4",
+        persona: "Build things",
+      } as any;
+
+      await manager.route(makeIncomingMessage(), connector, { employee });
+
+      expect(vi.mocked(createSession)).toHaveBeenCalledWith(
+        expect.objectContaining({ engine: "hermes:openrouter" }),
+      );
+    });
+
     it("should pass correct prompt to engine.run()", async () => {
       const engines = new Map<string, Engine>([["hermes", hermesEngine]]);
       const manager = new SessionManager(config, engines);
@@ -307,8 +328,29 @@ describe("SessionManager — Hermes-first routing", () => {
 
       const routingMeta = (metaCalls[0][1] as any).transportMeta.routingMeta;
       expect(routingMeta.requestedBrain).toBe("hermes");
+      expect(routingMeta.requestedRuntime).toBe("hermes");
+      expect(routingMeta.resolvedRuntimeRef).toBe("hermes");
       expect(routingMeta.actualExecutor).toBe("hermes");
       expect(routingMeta.fallbackUsed).toBe(false);
+    });
+
+    it("should preserve a logical runtimeRef variant while resolving the hermes executor", async () => {
+      const session = makeSession({ engine: "hermes:openrouter" });
+      vi.mocked(createSession).mockReturnValue(session);
+      vi.mocked(updateSession).mockImplementation((_id, changes) => makeSession({ ...session, ...(changes as Partial<Session>) }));
+      const engines = new Map<string, Engine>([["hermes", hermesEngine]]);
+      const manager = new SessionManager(config, engines);
+
+      await manager.route(makeIncomingMessage(), connector);
+
+      const updateCalls = vi.mocked(updateSession).mock.calls;
+      const metaCalls = updateCalls.filter(
+        ([, changes]) => changes && typeof changes === "object" && "transportMeta" in changes && (changes as any).transportMeta?.routingMeta,
+      );
+      const routingMeta = (metaCalls[0][1] as any).transportMeta.routingMeta;
+      expect(routingMeta.requestedRuntime).toBe("hermes:openrouter");
+      expect(routingMeta.resolvedRuntimeRef).toBe("hermes:openrouter");
+      expect(routingMeta.actualExecutor).toBe("hermes");
     });
 
     it("should write hermesMeta to transportMeta when Hermes engine runs", async () => {
@@ -374,6 +416,8 @@ describe("SessionManager — Hermes-first routing", () => {
 
       const routingMeta = (metaCalls[0][1] as any).transportMeta.routingMeta;
       expect(routingMeta.requestedBrain).toBe("hermes");
+      expect(routingMeta.requestedRuntime).toBe("hermes");
+      expect(routingMeta.resolvedRuntimeRef).toBe("claude");
       expect(routingMeta.actualExecutor).toBe("claude");
       expect(routingMeta.fallbackUsed).toBe(true);
       expect(routingMeta.fallbackReason).toContain("hermes");

@@ -215,19 +215,19 @@ export class SessionManager {
     target: Target,
     employee?: Employee,
   ): Promise<void> {
-    // Resolve brain via FallbackPolicy — Hermes-first by default
+    // Resolve runtime via runtimeRef fallback chain — legacy `brain` policy remains as a compat alias.
     const fallbackPolicy = this.config.brain ?? DEFAULT_FALLBACK_POLICY;
-    const requestedBrain = session.engine;
+    const requestedRuntime = session.engine;
     const availableEngines = new Set(this.engines.keys());
-    const { executor: resolvedEngine, fallbackUsed, fallbackReason } = resolveFallbackExecutor(
-      requestedBrain,
+    const { runtimeRef: resolvedRuntimeRef, executor: resolvedEngine, fallbackUsed, fallbackReason } = resolveFallbackExecutor(
+      requestedRuntime,
       availableEngines,
       fallbackPolicy,
     );
 
     if (fallbackUsed) {
       logger.warn(
-        `Session ${session.id}: fallback triggered — requested "${requestedBrain}", using "${resolvedEngine}". Reason: ${fallbackReason}`,
+        `Session ${session.id}: fallback triggered — requested runtime "${requestedRuntime}", using runtime "${resolvedRuntimeRef}" via executor "${resolvedEngine}". Reason: ${fallbackReason}`,
       );
     }
 
@@ -397,7 +397,9 @@ export class SessionManager {
           currentMeta["hermesMeta"] = result.hermesMeta;
         }
         currentMeta["routingMeta"] = {
-          requestedBrain,
+          requestedBrain: requestedRuntime,
+          requestedRuntime,
+          resolvedRuntimeRef,
           actualExecutor: resolvedEngine,
           fallbackUsed,
           ...(fallbackReason ? { fallbackReason } : {}),
