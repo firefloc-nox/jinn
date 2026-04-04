@@ -45,15 +45,35 @@ export function scanOrg(): Map<string, Employee> {
           const raw = fs.readFileSync(fullPath, "utf-8");
           const data = yaml.load(raw) as any;
           if (data && data.name && data.persona) {
-            const runtimeRef = typeof data.runtimeRef === "string" ? data.runtimeRef as RuntimeRef : undefined;
+            // ── Infer runtimeRef from legacy engine field if not explicitly set ──
+            const explicitRuntimeRef = typeof data.runtimeRef === "string" ? data.runtimeRef as RuntimeRef : undefined;
+            const legacyEngine = typeof data.engine === "string" ? data.engine : undefined;
+            // Map known engine names to runtime refs
+            const engineToRuntimeRef: Record<string, RuntimeRef> = {
+              hermes: "hermes",
+              claude: "claude",
+              codex: "codex",
+              gemini: "gemini",
+            };
+            const inferredRuntimeRef = explicitRuntimeRef
+              ?? (legacyEngine && Object.prototype.hasOwnProperty.call(engineToRuntimeRef, legacyEngine)
+                ? engineToRuntimeRef[legacyEngine]
+                : undefined);
+
+            // ── Map honcho:true → hermesHooks.memory for backward compat ─────
+            const honchoAsHooks: HermesHooks | undefined =
+              data.hermesHooks === undefined && data.honcho === true
+                ? { enabled: true, memory: true }
+                : undefined;
+
             const employee: Employee = {
               name: data.name,
               displayName: data.displayName || data.name,
               department:
                 data.department || path.basename(path.dirname(fullPath)),
               rank: data.rank || "employee",
-              engine: data.engine || runtimeRef || "hermes",
-              runtimeRef,
+              engine: legacyEngine || explicitRuntimeRef || "hermes",
+              runtimeRef: inferredRuntimeRef,
               profileRef: parseProfileRef(data.profileRef),
               model: data.model || undefined,
               reasoning: typeof data.reasoning === "string" ? data.reasoning : undefined,
@@ -68,11 +88,18 @@ export function scanOrg(): Map<string, Employee> {
                 ? data.provides.filter((s: unknown) => s && typeof s === "object" && typeof (s as any).name === "string" && typeof (s as any).description === "string")
                   .map((s: any) => ({ name: s.name as string, description: s.description as string }))
                 : undefined,
-              hermesHooks: parseHermesHooks(data.hermesHooks),
+              hermesHooks: parseHermesHooks(data.hermesHooks) ?? honchoAsHooks,
               hermesProfile: typeof data.hermesProfile === "string" ? data.hermesProfile : undefined,
               hermesProvider: typeof data.hermesProvider === "string" ? data.hermesProvider : undefined,
               hermesToolsets: typeof data.hermesToolsets === "string" ? data.hermesToolsets : undefined,
               hermesSkills: typeof data.hermesSkills === "string" ? data.hermesSkills : undefined,
+              // fallbackEngine (string) → fallbackRuntimes (RuntimeRef[])
+              fallbackRuntimes:
+                Array.isArray(data.fallbackRuntimes)
+                  ? data.fallbackRuntimes.filter((r: unknown) => typeof r === "string") as RuntimeRef[]
+                  : typeof data.fallbackEngine === "string"
+                    ? [data.fallbackEngine as RuntimeRef]
+                    : undefined,
             };
             registry.set(employee.name, employee);
           }
@@ -136,6 +163,7 @@ export interface UpdateEmployeeFields {
   model?: string | null;
   reasoning?: string | null;
   fallbackEngine?: string | null;
+  fallbackRuntimes?: RuntimeRef[] | null;
   emoji?: string | null;
   alwaysNotify?: boolean;
   mcp?: boolean | string[] | null;
@@ -221,6 +249,13 @@ export function updateEmployeeYaml(
         data.fallbackEngine = updates.fallbackEngine;
       }
     }
+    if (updates.fallbackRuntimes !== undefined) {
+      if (updates.fallbackRuntimes === null || updates.fallbackRuntimes.length === 0) {
+        delete data.fallbackRuntimes;
+      } else {
+        data.fallbackRuntimes = updates.fallbackRuntimes;
+      }
+    }
     if (updates.emoji !== undefined) {
       if (updates.emoji === null || updates.emoji === "") {
         delete data.emoji;
@@ -298,6 +333,7 @@ export interface CreateEmployeeInput {
   model?: string;
   reasoning?: string;
   fallbackEngine?: string;
+  fallbackRuntimes?: RuntimeRef[];
   emoji?: string;
   alwaysNotify?: boolean;
   mcp?: boolean | string[];
@@ -334,6 +370,7 @@ export function createEmployeeYaml(input: CreateEmployeeInput): string {
   if (input.model) data.model = input.model;
   if (input.reasoning) data.reasoning = input.reasoning;
   if (input.fallbackEngine) data.fallbackEngine = input.fallbackEngine;
+  if (input.fallbackRuntimes?.length) data.fallbackRuntimes = input.fallbackRuntimes;
   if (input.emoji) data.emoji = input.emoji;
   if (typeof input.alwaysNotify === "boolean") data.alwaysNotify = input.alwaysNotify;
   if (input.mcp !== undefined) data.mcp = input.mcp;

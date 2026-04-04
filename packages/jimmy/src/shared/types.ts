@@ -364,6 +364,8 @@ export interface Employee {
   hermesToolsets?: string;
   /** Hermes-specific: comma-separated skills to load (maps to --skills) */
   hermesSkills?: string;
+  /** @deprecated Legacy fallback runtime chain. Prefer org-level routing.fallbackRuntimes. */
+  fallbackRuntimes?: RuntimeRef[];
 }
 
 /** A service that an employee can provide to other employees/departments. */
