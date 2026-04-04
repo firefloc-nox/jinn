@@ -138,8 +138,15 @@ export class SessionManager {
 
     let session = getSessionBySessionKey(msg.sessionKey);
     if (!session) {
+      const requestedRuntime =
+        opts.engine
+        ?? opts.employee?.runtimeRef
+        ?? opts.employee?.engine
+        ?? this.config.routing?.defaultRuntime
+        ?? this.config.engines.default;
+
       session = createSession({
-        engine: opts.engine ?? opts.employee?.engine ?? this.config.engines.default,
+        engine: requestedRuntime,
         source: msg.source,
         sourceRef: msg.sessionKey,
         connector: msg.connector,
