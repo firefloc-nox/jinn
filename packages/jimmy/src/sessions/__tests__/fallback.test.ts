@@ -38,6 +38,17 @@ describe("resolveFallbackExecutor", () => {
       const available = new Set(["hermes", "claude", "codex"]);
       const result = resolveFallbackExecutor("hermes", available, policy);
 
+      expect(result.runtimeRef).toBe("hermes");
+      expect(result.executor).toBe("hermes");
+      expect(result.fallbackUsed).toBe(false);
+      expect(result.fallbackReason).toBeUndefined();
+    });
+
+    it("should resolve hermes:openrouter to hermes when hermes executor is available", () => {
+      const available = new Set(["hermes", "claude", "codex"]);
+      const result = resolveFallbackExecutor("hermes:openrouter", available, policy);
+
+      expect(result.runtimeRef).toBe("hermes:openrouter");
       expect(result.executor).toBe("hermes");
       expect(result.fallbackUsed).toBe(false);
       expect(result.fallbackReason).toBeUndefined();
@@ -66,8 +77,8 @@ describe("resolveFallbackExecutor", () => {
       const available = new Set(["claude"]);
       const result = resolveFallbackExecutor("hermes", available, policy);
 
-      expect(result.fallbackReason).toMatch(/Primary engine "hermes" not available/);
-      expect(result.fallbackReason).toMatch(/using "claude"/);
+      expect(result.fallbackReason).toMatch(/Runtime \"hermes\" not available/);
+      expect(result.fallbackReason).toMatch(/using \"claude\"/);
     });
   });
 
