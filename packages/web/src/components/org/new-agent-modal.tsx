@@ -12,7 +12,7 @@ const RUNTIME_OPTIONS = [
   { value: "codex", label: "codex", description: "Native Codex CLI" },
   { value: "gemini", label: "gemini", description: "Native Gemini CLI" },
 ] as const;
-const FALLBACK_RUNTIMES = ["claude", "codex", "gemini", "hermes", "hermes:openrouter", "hermes:ollama", "none"] as const;
+const RUNTIME_LIST = ["hermes", "hermes:openrouter", "hermes:ollama", "claude", "codex", "gemini"] as const;
 const PROVIDERS = ["anthropic", "openai", "openrouter", "ollama", "auto"] as const;
 
 function slugify(v: string) {
@@ -42,7 +42,7 @@ interface FormState {
   hermesProvider: string;
   // Step 3
   persona: string;
-  fallbackRuntime: (typeof FALLBACK_RUNTIMES)[number];
+  fallbackRuntimes: RuntimeOption[];
   mcp: boolean;
   honcho: boolean;
 }
@@ -61,7 +61,7 @@ const INITIAL: FormState = {
   cloneFrom: "",
   hermesProvider: "",
   persona: "",
-  fallbackRuntime: "none",
+  fallbackRuntimes: [],
   mcp: false,
   honcho: false,
 };
@@ -164,9 +164,9 @@ export function NewAgentModal({
             ? form.hermesProvider
             : undefined,
         fallbackEngine:
-          form.fallbackRuntime !== "none" ? getExecutorFromRuntimeRef(form.fallbackRuntime as RuntimeOption) : undefined,
+          form.fallbackRuntimes.length > 0 ? getExecutorFromRuntimeRef(form.fallbackRuntimes[0] as RuntimeOption) : undefined,
         fallbackRuntimes:
-          form.fallbackRuntime !== "none" ? [form.fallbackRuntime] : undefined,
+          form.fallbackRuntimes.length > 0 ? [...form.fallbackRuntimes] : undefined,
         mcp: form.mcp || undefined,
         honcho: form.honcho || undefined,
       };
@@ -480,23 +480,62 @@ export function NewAgentModal({
                 />
               </div>
               <div>
-                <label className={labelClass}>Fallback Runtime</label>
-                <select
-                  className={inputClass}
-                  value={form.fallbackRuntime}
-                  onChange={(e) =>
-                    setField(
-                      "fallbackRuntime",
-                      e.target.value as FormState["fallbackRuntime"],
-                    )
-                  }
-                >
-                  {FALLBACK_RUNTIMES.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
+                <label className={labelClass}>Fallback Runtime Chain</label>
+                <p className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mt-0 mb-[var(--space-2)]">
+                  Add runtimes to use if the primary runtime is unavailable. Order matters.
+                </p>
+                <div className="flex flex-col gap-[var(--space-2)]">
+                  {form.fallbackRuntimes.length === 0 && (
+                    <p className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] italic m-0">
+                      No fallback runtimes — add one below
+                    </p>
+                  )}
+                  {form.fallbackRuntimes.map((runtime, i) => (
+                    <div key={runtime + i} className="flex items-center gap-[var(--space-2)]">
+                      <span className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] w-4 shrink-0">
+                        {i + 1}.
+                      </span>
+                      <span className="flex-1 px-[var(--space-2)] py-[var(--space-1)] bg-[var(--fill-tertiary)] rounded-[var(--radius-sm,6px)] text-[length:var(--text-body)] text-[var(--text-primary)] font-[family-name:var(--font-mono)]">
+                        {runtime}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            fallbackRuntimes: f.fallbackRuntimes.filter((_, idx) => idx !== i),
+                          }))
+                        }
+                        className="px-[var(--space-2)] py-[var(--space-1)] rounded text-[var(--text-caption1)] text-[var(--system-red)] bg-none border-none cursor-pointer hover:bg-[var(--fill-tertiary)]"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   ))}
-                </select>
+                  <div className="flex gap-[var(--space-2)] items-center mt-[var(--space-1)]">
+                    <select
+                      className={inputClass + " flex-1"}
+                      value=""
+                      onChange={(e) => {
+                        const val = e.target.value as RuntimeOption;
+                        if (val && !form.fallbackRuntimes.includes(val)) {
+                          setForm((f) => ({
+                            ...f,
+                            fallbackRuntimes: [...f.fallbackRuntimes, val],
+                          }));
+                        }
+                        // Reset to placeholder
+                        const sel = e.target;
+                        sel.selectedIndex = 0;
+                      }}
+                    >
+                      <option value="">+ Add fallback runtime</option>
+                      {RUNTIME_LIST.filter((r) => r !== form.runtimeRef && !form.fallbackRuntimes.includes(r)).map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
               <div>
                 <label className={labelClass}>Hermes Hooks</label>

@@ -211,6 +211,44 @@ test.describe('Org', () => {
     await expect(page.getByRole('button', { name: /hermes:openrouter/i })).toBeVisible()
     await expect(page.getByRole('button', { name: /hermes:ollama/i })).toBeVisible()
   })
+
+  test('new agent modal fallback chain editor works', async ({ page }) => {
+    const resp = await page.goto('/org')
+    expect(resp?.status()).not.toBe(500)
+
+    await page.getByRole('button', { name: /new agent/i }).click()
+    await expect(page.getByText('New Agent').first()).toBeVisible()
+    await page.getByPlaceholder('My Agent').fill('Fallback QA Agent')
+
+    // Step 1 -> 2
+    await page.getByRole('button', { name: 'Next' }).click()
+    // Step 2 -> 3
+    await page.getByRole('button', { name: 'Next' }).click()
+
+    // Step 3: Fallback Runtime Chain section
+    await expect(page.getByText('Fallback Runtime Chain')).toBeVisible()
+    await expect(page.getByText('No fallback runtimes — add one below')).toBeVisible()
+
+    // Add a fallback runtime — check via Remove button presence (unique to the chain)
+    await page.locator('select').filter({ hasText: '+ Add fallback runtime' }).selectOption('codex')
+    await page.waitForTimeout(300)
+    // 1 Remove button appeared = codex was added
+    await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible()
+
+    // Add another
+    await page.locator('select').filter({ hasText: '+ Add fallback runtime' }).selectOption('hermes:openrouter')
+    await page.waitForTimeout(300)
+    // 2 Remove buttons now
+    const removeButtons = page.getByRole('button', { name: 'Remove' })
+    await expect(removeButtons).toHaveCount(2)
+
+    // Remove one
+    await removeButtons.first().click()
+    await page.waitForTimeout(300)
+    // After remove, 1 runtime remains
+    await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Remove' })).toHaveCount(1)
+  })
 })
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
