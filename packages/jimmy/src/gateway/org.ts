@@ -172,6 +172,8 @@ export interface UpdateEmployeeFields {
   hermesProvider?: string | null;
   hermesToolsets?: string | null;
   hermesSkills?: string | null;
+  /** @deprecated Use hermesHooks.memory instead. Synced bidirectionally. */
+  honcho?: boolean | null;
 }
 
 /**
@@ -253,7 +255,15 @@ export function updateEmployeeYaml(
       if (updates.fallbackRuntimes === null || updates.fallbackRuntimes.length === 0) {
         delete data.fallbackRuntimes;
       } else {
-        data.fallbackRuntimes = updates.fallbackRuntimes;
+        // Filter to only string elements (defensive — reject malformed input)
+        const filtered = (updates.fallbackRuntimes as unknown[]).filter(
+          (r): r is string => typeof r === "string",
+        );
+        if (filtered.length === 0) {
+          delete data.fallbackRuntimes;
+        } else {
+          data.fallbackRuntimes = filtered;
+        }
       }
     }
     if (updates.emoji !== undefined) {
@@ -276,8 +286,33 @@ export function updateEmployeeYaml(
     if (updates.hermesHooks !== undefined) {
       if (updates.hermesHooks === null) {
         delete data.hermesHooks;
+        delete data.hermesProfile; // honcho: legacy compat: also clear honcho when hooks are cleared
       } else {
         data.hermesHooks = updates.hermesHooks;
+        // Sync honcho legacy field bidirectionally with hermesHooks.memory
+        data.honcho = updates.hermesHooks.memory ?? false;
+      }
+    }
+    // Sync hermesHooks.memory from honcho when honcho is written standalone
+    if (updates.honcho !== undefined) {
+      if (updates.honcho === null || updates.honcho === false) {
+        delete data.honcho;
+        // Also clear hermesHooks.memory if it was set by a previous honcho:true
+        if (data.hermesHooks) {
+          delete (data.hermesHooks as Record<string, unknown>).memory;
+          if (Object.keys(data.hermesHooks).length === 0) {
+            delete data.hermesHooks;
+          }
+        }
+      } else {
+        data.honcho = true;
+        // Upgrade: hermesHooks.memory takes precedence; set it if not already present
+        if (!data.hermesHooks) {
+          data.hermesHooks = { enabled: true, memory: true };
+        } else if (!(data.hermesHooks as HermesHooks).memory) {
+          (data.hermesHooks as HermesHooks).memory = true;
+          (data.hermesHooks as HermesHooks).enabled = true;
+        }
       }
     }
     if (updates.hermesProfile !== undefined) {
@@ -342,6 +377,8 @@ export interface CreateEmployeeInput {
   hermesProvider?: string;
   hermesToolsets?: string;
   hermesSkills?: string;
+  /** @deprecated Use hermesHooks.memory instead. Synced bidirectionally. */
+  honcho?: boolean;
 }
 
 /**
@@ -374,7 +411,16 @@ export function createEmployeeYaml(input: CreateEmployeeInput): string {
   if (input.emoji) data.emoji = input.emoji;
   if (typeof input.alwaysNotify === "boolean") data.alwaysNotify = input.alwaysNotify;
   if (input.mcp !== undefined) data.mcp = input.mcp;
-  if (input.hermesHooks) data.hermesHooks = input.hermesHooks;
+  if (input.hermesHooks) {
+    data.hermesHooks = input.hermesHooks;
+    data.honcho = input.hermesHooks.memory ?? false; // legacy compat write
+  }
+  if (typeof input.honcho === "boolean") {
+    data.honcho = input.honcho;
+    if (input.honcho && !input.hermesHooks) {
+      data.hermesHooks = { enabled: true, memory: true }; // upgrade honcho:true
+    }
+  }
   if (input.hermesProfile) data.hermesProfile = input.hermesProfile;
   if (input.hermesProvider) data.hermesProvider = input.hermesProvider;
   if (input.hermesToolsets) data.hermesToolsets = input.hermesToolsets;

@@ -122,6 +122,7 @@ interface EditState {
   hermesHooks: {
     memory: boolean;
     mcp: boolean;
+    skills: boolean;
   };
 }
 
@@ -211,6 +212,7 @@ export function EmployeeDetail({
       hermesHooks: {
         memory: employee.hermesHooks?.memory ?? employee.honcho ?? false,
         mcp: employee.hermesHooks?.mcp ?? employee.mcp ?? false,
+        skills: employee.hermesHooks?.skills ?? false,
       },
     });
     setEditing(true);
@@ -259,7 +261,7 @@ export function EmployeeDetail({
       persona: editState.persona,
       runtimeRef,
       fallbackRuntimes: editState.fallbackRuntimes,
-      hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp
+      hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp || editState.hermesHooks.skills
         ? { enabled: true, ...editState.hermesHooks }
         : undefined,
     };
@@ -273,7 +275,7 @@ export function EmployeeDetail({
         persona: editState.persona,
         runtimeRef,
         fallbackRuntimes: editState.fallbackRuntimes,
-        hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp
+        hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp || editState.hermesHooks.skills
           ? { enabled: true, ...editState.hermesHooks }
           : undefined,
       });
@@ -597,6 +599,18 @@ export function EmployeeDetail({
                   />
                   MCP tools
                 </label>
+                <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editState?.hermesHooks.skills ?? false}
+                    onChange={(e) =>
+                      setEditState((s) =>
+                        s ? { ...s, hermesHooks: { ...s.hermesHooks, skills: e.target.checked } } : s,
+                      )
+                    }
+                  />
+                  Skills
+                </label>
               </div>
             ) : (
               <div className="flex gap-[var(--space-4)]">
@@ -610,7 +624,12 @@ export function EmployeeDetail({
                     MCP tools
                   </Badge>
                 )}
-                {!employee.hermesHooks?.memory && !employee.honcho && !employee.hermesHooks?.mcp && !employee.mcp && (
+                {employee.hermesHooks?.skills && (
+                  <Badge variant="outline" className="border-[var(--separator)] text-[var(--text-secondary)] px-2.5 py-1 text-[length:var(--text-caption2)]">
+                    Skills
+                  </Badge>
+                )}
+                {!employee.hermesHooks?.memory && !employee.honcho && !employee.hermesHooks?.mcp && !employee.mcp && !employee.hermesHooks?.skills && (
                   <span className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] italic">
                     No hooks enabled
                   </span>

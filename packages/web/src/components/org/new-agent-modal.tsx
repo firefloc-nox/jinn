@@ -45,6 +45,7 @@ interface FormState {
   fallbackRuntimes: RuntimeOption[];
   mcp: boolean;
   honcho: boolean;
+  skills: boolean;
 }
 
 const INITIAL: FormState = {
@@ -64,6 +65,7 @@ const INITIAL: FormState = {
   fallbackRuntimes: [],
   mcp: false,
   honcho: false,
+  skills: false,
 };
 
 export function NewAgentModal({
@@ -151,11 +153,12 @@ export function NewAgentModal({
           ? { runtime: "hermes", name: hermesProfileName }
           : undefined,
         persona: form.persona || undefined,
-        hermesHooks: form.mcp || form.honcho
+        hermesHooks: form.mcp || form.honcho || form.skills
           ? {
               enabled: true,
               memory: form.honcho || undefined,
               mcp: form.mcp || undefined,
+              skills: form.skills || undefined,
             }
           : undefined,
         hermesProfile: hermesProfileName,
@@ -555,6 +558,14 @@ export function NewAgentModal({
                       onChange={(e) => setField("honcho", e.target.checked)}
                     />
                     Honcho memory
+                  </label>
+                  <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.skills}
+                      onChange={(e) => setField("skills", e.target.checked)}
+                    />
+                    Skills
                   </label>
                 </div>
               </div>

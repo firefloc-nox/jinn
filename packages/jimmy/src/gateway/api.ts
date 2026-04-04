@@ -1359,7 +1359,11 @@ export async function handleApiRequest(
         model: body.model !== undefined ? (body.model === null || typeof body.model === "string" ? body.model : undefined) : undefined,
         reasoning: body.reasoning !== undefined ? (body.reasoning === null || typeof body.reasoning === "string" ? body.reasoning : undefined) : undefined,
         fallbackEngine: body.fallbackEngine !== undefined ? (body.fallbackEngine === null || typeof body.fallbackEngine === "string" ? body.fallbackEngine : undefined) : undefined,
-        fallbackRuntimes: body.fallbackRuntimes !== undefined ? (body.fallbackRuntimes === null || Array.isArray(body.fallbackRuntimes) ? body.fallbackRuntimes : undefined) : undefined,
+        fallbackRuntimes: body.fallbackRuntimes !== undefined
+          ? (body.fallbackRuntimes === null || Array.isArray(body.fallbackRuntimes)
+              ? body.fallbackRuntimes
+              : undefined)
+          : undefined,
         emoji: body.emoji !== undefined ? (body.emoji === null || typeof body.emoji === "string" ? body.emoji : undefined) : undefined,
         alwaysNotify: typeof body.alwaysNotify === "boolean" ? body.alwaysNotify : undefined,
         mcp: body.mcp !== undefined ? body.mcp : undefined,
@@ -1368,6 +1372,7 @@ export async function handleApiRequest(
         hermesProvider: body.hermesProvider !== undefined ? (body.hermesProvider === null || typeof body.hermesProvider === "string" ? body.hermesProvider : undefined) : undefined,
         hermesToolsets: body.hermesToolsets !== undefined ? (body.hermesToolsets === null || typeof body.hermesToolsets === "string" ? body.hermesToolsets : undefined) : undefined,
         hermesSkills: body.hermesSkills !== undefined ? (body.hermesSkills === null || typeof body.hermesSkills === "string" ? body.hermesSkills : undefined) : undefined,
+        honcho: body.honcho !== undefined ? (body.honcho === null || typeof body.honcho === "boolean" ? body.honcho : undefined) : undefined,
       });
       if (!updated) return notFound(res);
       context.emit("org:updated", { employee: params.name });
@@ -1486,6 +1491,7 @@ export async function handleApiRequest(
           hermesProvider: typeof body.hermesProvider === "string" ? body.hermesProvider : undefined,
           hermesToolsets: typeof body.hermesToolsets === "string" ? body.hermesToolsets : undefined,
           hermesSkills: typeof body.hermesSkills === "string" ? body.hermesSkills : undefined,
+          honcho: typeof body.honcho === "boolean" ? body.honcho : undefined,
         });
       } catch (err) {
         return serverError(res, `Failed to create employee: ${err instanceof Error ? err.message : String(err)}`);
