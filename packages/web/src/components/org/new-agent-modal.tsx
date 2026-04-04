@@ -220,9 +220,9 @@ export function NewAgentModal({
         <div className="flex items-center gap-[var(--space-4)] px-[var(--space-6)] py-[var(--space-3)] border-b border-[var(--separator)]">
           {stepLabel(1, "Identity")}
           <span className="text-[var(--separator)]">›</span>
-          {stepLabel(2, "Engine")}
+          {stepLabel(2, "Runtime")}
           <span className="text-[var(--separator)]">›</span>
-          {stepLabel(3, "Persona")}
+          {stepLabel(3, "Hooks")}
         </div>
 
         {/* Form content */}
@@ -328,7 +328,7 @@ export function NewAgentModal({
           {step === 2 && (
             <div className="flex flex-col gap-[var(--space-4)]">
               <div>
-                <label className={labelClass}>Engine</label>
+                <label className={labelClass}>Runtime</label>
                 <div className="flex gap-[var(--space-2)]">
                   {ENGINES.map((e) => (
                     <button
@@ -430,7 +430,7 @@ export function NewAgentModal({
                     )}
                   </div>
                   <div>
-                    <label className={labelClass}>Provider (optional)</label>
+                    <label className={labelClass}>Hermes Provider (optional)</label>
                     <select
                       className={inputClass}
                       value={form.hermesProvider}
@@ -464,7 +464,7 @@ export function NewAgentModal({
                 />
               </div>
               <div>
-                <label className={labelClass}>Fallback Engine</label>
+                <label className={labelClass}>Fallback Runtime</label>
                 <select
                   className={inputClass}
                   value={form.fallbackEngine}
@@ -482,23 +482,26 @@ export function NewAgentModal({
                   ))}
                 </select>
               </div>
-              <div className="flex gap-[var(--space-6)]">
-                <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.mcp}
-                    onChange={(e) => setField("mcp", e.target.checked)}
-                  />
-                  MCP tools
-                </label>
-                <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.honcho}
-                    onChange={(e) => setField("honcho", e.target.checked)}
-                  />
-                  Honcho memory
-                </label>
+              <div>
+                <label className={labelClass}>Hermes Hooks</label>
+                <div className="flex gap-[var(--space-6)]">
+                  <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.mcp}
+                      onChange={(e) => setField("mcp", e.target.checked)}
+                    />
+                    MCP tools
+                  </label>
+                  <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.honcho}
+                      onChange={(e) => setField("honcho", e.target.checked)}
+                    />
+                    Honcho memory
+                  </label>
+                </div>
               </div>
             </div>
           )}

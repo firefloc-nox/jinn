@@ -37,6 +37,10 @@ const ACCENT_PRESETS = [
 
 interface Config {
   gateway?: { port?: number; host?: string }
+  routing?: {
+    defaultRuntime?: string
+    fallbackRuntimes?: string[]
+  }
   brain?: {
     primary?: string
     fallbacks?: string[]
