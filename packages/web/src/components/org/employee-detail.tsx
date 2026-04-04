@@ -9,6 +9,19 @@ import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { Badge } from "@/components/ui/badge";
 import { HermesProfileEditorModal } from "@/components/org/hermes-profile-editor-modal";
 
+const RUNTIME_OPTIONS = [
+  { value: "hermes", label: "hermes" },
+  { value: "hermes:openrouter", label: "hermes:openrouter" },
+  { value: "hermes:ollama", label: "hermes:ollama" },
+  { value: "claude", label: "claude" },
+  { value: "codex", label: "codex" },
+  { value: "gemini", label: "gemini" },
+] as const;
+
+const RUNTIME_LIST = ["hermes", "hermes:openrouter", "hermes:ollama", "claude", "codex", "gemini"] as const;
+
+type RuntimeOption = (typeof RUNTIME_OPTIONS)[number]["value"];
+
 interface SessionData {
   id: string;
   employee?: string | null;
@@ -104,6 +117,12 @@ interface EditState {
   rank: Employee["rank"];
   reportsTo: string;
   persona: string;
+  runtimeRef: RuntimeOption;
+  fallbackRuntimes: RuntimeOption[];
+  hermesHooks: {
+    memory: boolean;
+    mcp: boolean;
+  };
 }
 
 export function EmployeeDetail({
@@ -187,6 +206,12 @@ export function EmployeeDetail({
         ? employee.reportsTo[0] ?? ""
         : employee.reportsTo ?? "",
       persona: employee.persona || "",
+      runtimeRef: (employee.runtimeRef || employee.engine || "hermes") as RuntimeOption,
+      fallbackRuntimes: (employee.fallbackRuntimes ?? []) as RuntimeOption[],
+      hermesHooks: {
+        memory: employee.hermesHooks?.memory ?? employee.honcho ?? false,
+        mcp: employee.hermesHooks?.mcp ?? employee.mcp ?? false,
+      },
     });
     setEditing(true);
     setSaveError(null);
@@ -224,6 +249,7 @@ export function EmployeeDetail({
     setSaving(true);
     setSaveError(null);
     const prev = { ...employee };
+    const runtimeRef = editState.runtimeRef;
     const updated: Employee = {
       ...employee,
       displayName: editState.displayName,
@@ -231,6 +257,11 @@ export function EmployeeDetail({
       rank: editState.rank,
       reportsTo: editState.reportsTo || undefined,
       persona: editState.persona,
+      runtimeRef,
+      fallbackRuntimes: editState.fallbackRuntimes,
+      hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp
+        ? { enabled: true, ...editState.hermesHooks }
+        : undefined,
     };
     setEmployee(updated); // optimistic
     try {
@@ -240,6 +271,11 @@ export function EmployeeDetail({
         rank: editState.rank,
         reportsTo: editState.reportsTo || undefined,
         persona: editState.persona,
+        runtimeRef,
+        fallbackRuntimes: editState.fallbackRuntimes,
+        hermesHooks: editState.hermesHooks.memory || editState.hermesHooks.mcp
+          ? { enabled: true, ...editState.hermesHooks }
+          : undefined,
       });
       setEditing(false);
       setEditState(null);
@@ -441,14 +477,30 @@ export function EmployeeDetail({
         <div className="mt-[var(--space-4)] grid grid-cols-2 gap-[var(--space-4)]">
           <div>
             <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
-              Engine
+              Runtime
             </p>
-            <EngineChip
-              engine={employee.engine || "hermes"}
-              runtimeRef={employee.runtimeRef}
-              profileName={employee.profileRef?.name}
-              hermesProfile={employee.hermesProfile}
-            />
+            {editing ? (
+              <select
+                className="text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[2px] w-full"
+                value={editState?.runtimeRef ?? "hermes"}
+                onChange={(e) =>
+                  setEditState((s) =>
+                    s ? { ...s, runtimeRef: e.target.value as RuntimeOption } : s,
+                  )
+                }
+              >
+                {RUNTIME_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            ) : (
+              <EngineChip
+                engine={employee.engine || "hermes"}
+                runtimeRef={employee.runtimeRef}
+                profileName={employee.profileRef?.name}
+                hermesProfile={employee.hermesProfile}
+              />
+            )}
           </div>
           {editing && otherEmployees.length > 0 && (
             <div>
@@ -476,32 +528,168 @@ export function EmployeeDetail({
         </div>
 
         {/* Hermes Profile section */}
-        {employee.hermesProfile && (
+        {(employee.hermesProfile || editing) && (
           <div className="mt-[var(--space-4)] pt-[var(--space-4)] border-t border-[var(--separator)]">
             <div className="flex items-center justify-between mb-[var(--space-2)]">
               <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] m-0">
                 Hermes Profile
               </p>
-              <button
-                onClick={() => setShowProfileEditor(true)}
-                className="text-[length:var(--text-caption1)] text-[var(--accent)] bg-none border-none cursor-pointer p-0"
-              >
-                Edit Profile
-              </button>
+              {!editing && employee.hermesProfile && (
+                <button
+                  onClick={() => setShowProfileEditor(true)}
+                  className="text-[length:var(--text-caption1)] text-[var(--accent)] bg-none border-none cursor-pointer p-0"
+                >
+                  Edit Profile
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-[var(--space-2)]">
-              <Badge
-                variant="outline"
-                className="border-transparent bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)] px-2.5 py-1 text-[length:var(--text-caption1)] font-[var(--weight-semibold)]"
-              >
-                {employee.hermesProfile}
-              </Badge>
-              {employee.hermesProvider && (
+              {employee.hermesProfile ? (
+                <Badge
+                  variant="outline"
+                  className="border-transparent bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)] px-2.5 py-1 text-[length:var(--text-caption1)] font-[var(--weight-semibold)]"
+                >
+                  {employee.hermesProfile}
+                </Badge>
+              ) : (
+                <span className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] italic">
+                  No profile assigned
+                </span>
+              )}
+              {employee.hermesProvider && !editing && (
                 <span className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)]">
                   via {employee.hermesProvider}
                 </span>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Hermes Hooks section */}
+        {(employee.hermesHooks || employee.honcho || employee.mcp || editing) && (
+          <div className="mt-[var(--space-4)] pt-[var(--space-4)] border-t border-[var(--separator)]">
+            <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
+              Hermes Hooks
+            </p>
+            {editing ? (
+              <div className="flex gap-[var(--space-6)]">
+                <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editState?.hermesHooks.memory ?? false}
+                    onChange={(e) =>
+                      setEditState((s) =>
+                        s ? { ...s, hermesHooks: { ...s.hermesHooks, memory: e.target.checked } } : s,
+                      )
+                    }
+                  />
+                  Honcho memory
+                </label>
+                <label className="flex items-center gap-[var(--space-2)] text-[length:var(--text-body)] text-[var(--text-primary)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editState?.hermesHooks.mcp ?? false}
+                    onChange={(e) =>
+                      setEditState((s) =>
+                        s ? { ...s, hermesHooks: { ...s.hermesHooks, mcp: e.target.checked } } : s,
+                      )
+                    }
+                  />
+                  MCP tools
+                </label>
+              </div>
+            ) : (
+              <div className="flex gap-[var(--space-4)]">
+                {(employee.hermesHooks?.memory || employee.honcho) && (
+                  <Badge variant="outline" className="border-[var(--separator)] text-[var(--text-secondary)] px-2.5 py-1 text-[length:var(--text-caption2)]">
+                    Honcho memory
+                  </Badge>
+                )}
+                {(employee.hermesHooks?.mcp || employee.mcp) && (
+                  <Badge variant="outline" className="border-[var(--separator)] text-[var(--text-secondary)] px-2.5 py-1 text-[length:var(--text-caption2)]">
+                    MCP tools
+                  </Badge>
+                )}
+                {!employee.hermesHooks?.memory && !employee.honcho && !employee.hermesHooks?.mcp && !employee.mcp && (
+                  <span className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] italic">
+                    No hooks enabled
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Fallback Runtime Chain section */}
+        {(editing || (employee.fallbackRuntimes && employee.fallbackRuntimes.length > 0)) && (
+          <div className="mt-[var(--space-4)] pt-[var(--space-4)] border-t border-[var(--separator)]">
+            <p className="text-[length:var(--text-caption2)] font-[var(--weight-semibold)] uppercase tracking-[var(--tracking-wide)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
+              Fallback Runtime Chain
+            </p>
+            {editing ? (
+              <div className="flex flex-col gap-[var(--space-2)]">
+                {(editState?.fallbackRuntimes ?? []).length === 0 && (
+                  <p className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] italic m-0">
+                    No fallback runtimes — add one below
+                  </p>
+                )}
+                {(editState?.fallbackRuntimes ?? []).map((runtime, i) => (
+                  <div key={runtime + i} className="flex items-center gap-[var(--space-2)]">
+                    <span className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] w-4 shrink-0">{i + 1}.</span>
+                    <span className="flex-1 px-[var(--space-2)] py-[var(--space-1)] bg-[var(--fill-tertiary)] rounded-[var(--radius-sm,6px)] text-[length:var(--text-body)] text-[var(--text-primary)] font-[family-name:var(--font-mono)]">
+                      {runtime}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditState((s) =>
+                          s
+                            ? { ...s, fallbackRuntimes: s.fallbackRuntimes.filter((_, idx) => idx !== i) }
+                            : s,
+                        )
+                      }
+                      className="px-[var(--space-2)] py-[var(--space-1)] rounded text-[var(--text-caption1)] text-[var(--system-red)] bg-none border-none cursor-pointer hover:bg-[var(--fill-tertiary)]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-[var(--space-2)] items-center mt-[var(--space-1)]">
+                  <select
+                    className="flex-1 text-[length:var(--text-body)] text-[var(--text-primary)] bg-[var(--fill-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm,6px)] px-[var(--space-2)] py-[2px]"
+                    value=""
+                    onChange={(e) => {
+                      const val = e.target.value as RuntimeOption;
+                      const current = editState?.fallbackRuntimes ?? [];
+                      if (val && !current.includes(val)) {
+                        setEditState((s) =>
+                          s ? { ...s, fallbackRuntimes: [...s.fallbackRuntimes, val] } : s,
+                        );
+                      }
+                      // Reset to placeholder
+                      const sel = e.target as HTMLSelectElement;
+                      sel.selectedIndex = 0;
+                    }}
+                  >
+                    <option value="">+ Add fallback runtime</option>
+                    {RUNTIME_LIST.filter((r) => r !== editState?.runtimeRef && !(editState?.fallbackRuntimes ?? []).includes(r)).map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-[var(--space-1)]">
+                {(employee.fallbackRuntimes ?? []).map((runtime, i) => (
+                  <div key={runtime + i} className="flex items-center gap-[var(--space-2)]">
+                    <span className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] w-4 shrink-0">{i + 1}.</span>
+                    <span className="px-[var(--space-2)] py-[var(--space-1)] bg-[var(--fill-tertiary)] rounded-[var(--radius-sm,6px)] text-[length:var(--text-body)] text-[var(--text-primary)] font-[family-name:var(--font-mono)]">
+                      {runtime}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
