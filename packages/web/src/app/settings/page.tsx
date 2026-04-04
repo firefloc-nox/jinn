@@ -598,6 +598,9 @@ export default function SettingsPage() {
     updateConfig(['brain', 'fallbacks'], nextFallbacks)
     updateConfig(['engines', 'default'], nextPrimary)
     updateConfig(['sessions', 'fallbackEngines'], nextFallbacks)
+    // Write to new routing model
+    updateConfig(['routing', 'defaultRuntime'], nextPrimary)
+    updateConfig(['routing', 'fallbackRuntimes'], nextFallbacks)
   }
 
   function handleFallbackEnabledChange(brain: string, enabled: boolean) {
@@ -607,12 +610,14 @@ export default function SettingsPage() {
 
     updateConfig(['brain', 'fallbacks'], nextFallbacks)
     updateConfig(['sessions', 'fallbackEngines'], nextFallbacks)
+    updateConfig(['routing', 'fallbackRuntimes'], nextFallbacks)
   }
 
   function handleFallbackMove(brain: string, direction: 'up' | 'down') {
     const nextFallbacks = moveFallbackBrain(brainSnapshot.fallbacks, brain, direction)
     updateConfig(['brain', 'fallbacks'], nextFallbacks)
     updateConfig(['sessions', 'fallbackEngines'], nextFallbacks)
+    updateConfig(['routing', 'fallbackRuntimes'], nextFallbacks)
   }
 
   function handleSave() {
