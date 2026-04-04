@@ -7,6 +7,11 @@ interface EngineConfigShape {
 }
 
 export interface BrainSettingsConfig {
+  routing?: {
+    defaultRuntime?: string
+    fallbackRuntimes?: string[]
+    [key: string]: unknown
+  }
   brain?: {
     primary?: string
     fallbacks?: string[]
@@ -55,6 +60,7 @@ export function getBrainConfigSnapshot(
   availableBrains: string[],
 ): { primary: string; fallbacks: string[] } {
   const primary =
+    config?.routing?.defaultRuntime ??
     config?.brain?.primary ??
     status?.defaultBrain ??
     status?.brain?.primary ??
@@ -63,6 +69,7 @@ export function getBrainConfigSnapshot(
     'hermes'
 
   const configuredFallbacks =
+    config?.routing?.fallbackRuntimes ??
     config?.brain?.fallbacks ??
     status?.fallbackPolicy?.fallbacks ??
     status?.brain?.fallbacks ??
@@ -90,10 +97,14 @@ export function moveFallbackBrain(fallbacks: string[], brain: string, direction:
 
 export function sanitizeConfigForSave(config: BrainSettingsConfig): BrainSettingsConfig {
   const next: BrainSettingsConfig = structuredClone(config)
-  const primary = next.brain?.primary
-  const fallbacks = next.brain?.fallbacks
+  const primary = next.routing?.defaultRuntime ?? next.brain?.primary
+  const fallbacks = next.routing?.fallbackRuntimes ?? next.brain?.fallbacks
 
   if (primary) {
+    next.routing = {
+      ...(next.routing ?? {}),
+      defaultRuntime: primary,
+    }
     next.engines = {
       ...(next.engines ?? {}),
       default: primary,
@@ -101,6 +112,10 @@ export function sanitizeConfigForSave(config: BrainSettingsConfig): BrainSetting
   }
 
   if (fallbacks) {
+    next.routing = {
+      ...(next.routing ?? {}),
+      fallbackRuntimes: [...fallbacks],
+    }
     next.sessions = {
       ...(next.sessions ?? {}),
       fallbackEngines: [...fallbacks],

@@ -38,7 +38,8 @@ describe('brain-settings helpers', () => {
   it('builds a stable brain config snapshot and excludes the primary from fallbacks', () => {
     const snapshot = getBrainConfigSnapshot(
       {
-        brain: { primary: 'hermes', fallbacks: ['claude', 'codex'] },
+        routing: { defaultRuntime: 'hermes', fallbackRuntimes: ['claude', 'codex'] },
+        brain: { primary: 'claude', fallbacks: ['gemini'] },
         sessions: { fallbackEngines: ['codex', 'gemini'] },
         engines: {
           default: 'claude',
@@ -66,9 +67,10 @@ describe('brain-settings helpers', () => {
     expect(original).toEqual(['claude', 'codex', 'gemini'])
   })
 
-  it('sanitizes config for save while preserving Hermes brain selections on supported keys', () => {
+  it('sanitizes config for save while preserving routing selections on supported keys', () => {
     const sanitized = sanitizeConfigForSave({
-      brain: { primary: 'hermes', fallbacks: ['claude', 'codex'] },
+      routing: { defaultRuntime: 'hermes', fallbackRuntimes: ['claude', 'codex'] },
+      brain: { primary: 'codex', fallbacks: ['gemini'] },
       engines: {
         default: 'claude',
         claude: { bin: 'claude', model: 'opus' },
@@ -80,10 +82,12 @@ describe('brain-settings helpers', () => {
     })
 
     expect('brain' in sanitized).toBe(false)
+    expect(sanitized.routing?.defaultRuntime).toBe('hermes')
+    expect(sanitized.routing?.fallbackRuntimes).toEqual(['claude', 'codex'])
     expect(sanitized.engines?.default).toBe('hermes')
     expect(sanitized.sessions?.fallbackEngines).toEqual(['claude', 'codex'])
-    expect(sanitized.engines?.hermes?.perEmployeeProfileSelection).toBe(true)
-    expect(sanitized.engines?.hermes?.mcpEnabled).toBe(true)
+    expect((sanitized.engines?.hermes as any)?.perEmployeeProfileSelection).toBe(true)
+    expect((sanitized.engines?.hermes as any)?.mcpEnabled).toBe(true)
   })
 
   it('prefers the status API default brain when config has no explicit brain block', () => {
