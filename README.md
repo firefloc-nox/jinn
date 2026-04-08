@@ -8,28 +8,35 @@
 
 ## What's Different?
 
-This fork extends Jinn with **Hermes-first** features, treating Claude Code (via Hermes) as the primary runtime rather than just one of many engines.
+This fork extends Jinn with a **Hermes feature layer** — additional capabilities that enhance any engine, not a replacement for them.
 
-### 🔮 Hermes Integration
+### 🔮 Hermes Feature Layer
+
+Hermes is **not a Claude Code wrapper**. It's an **extension layer for Jinn** that adds:
 
 | Feature | Description |
 |---------|-------------|
-| **H · Sessions** | Browse past Hermes sessions with full transcripts |
+| **H · Sessions** | Browse past sessions with full transcripts |
 | **H · Memory** | View and edit `MEMORY.md` / `USER.md` directly |
 | **H · Honcho** | Deep integration with [Honcho](https://github.com/plastic-labs/honcho) vectorial memory |
-| **H · Skills** | Browse, search, and manage Hermes skills library |
+| **H · Skills** | Browse, search, and manage reusable skill library |
 | **H · Wiki** | Multi-wiki browser with tree view, search, and in-browser editing |
 
 ### 🧠 Bus-Not-Brain Philosophy
 
-Jinn is a **bus, not a brain**. It doesn't reinvent AI logic — it connects battle-tested CLIs (Claude Code, Codex, Gemini) to the outside world. When you select Hermes as your engine, you get:
+Jinn is a **bus, not a brain**. It orchestrates engines — Claude Code, Codex, Gemini, Ollama — without reinventing their logic.
 
-- Full Claude Code capabilities (tools, file editing, multi-step reasoning)
-- Hermes memory injection (skills, user profile, session context)
-- Native MCP server support
-- Honcho long-term memory
+```
+JINN (bus)
+├── Engines: Claude Code, Codex, Gemini, Ollama (directly invocable)
+├── Hermes Layer: memory, skills, Honcho, wiki (extends Jinn features)
+├── Org System: departments, agents, task boards
+└── Connectors: Slack, Discord, Telegram, Cron
+```
 
-If you don't want Hermes, select `claude` or `codex` directly — you'll get vanilla engine behavior.
+**Claude Code is invocable directly by Jinn** through the org system. Hermes features are available regardless of which engine you use — they extend Jinn itself, not any specific engine.
+
+If you don't want Hermes features, don't use them. The core Jinn functionality works independently.
 
 ---
 
@@ -147,34 +154,44 @@ skills:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    JINN GATEWAY                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │   Hermes    │  │   Claude    │  │   Codex     │     │
-│  │  (primary)  │  │   (direct)  │  │   (direct)  │     │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │
-│         │                │                │             │
-│  ┌──────┴────────────────┴────────────────┴──────┐     │
-│  │              Session Manager                   │     │
-│  │    (routing, queue, cron, org system)         │     │
-│  └──────┬────────────────┬────────────────┬──────┘     │
-│         │                │                │             │
-│  ┌──────┴──────┐  ┌──────┴──────┐  ┌──────┴──────┐     │
-│  │    Slack    │  │   Discord   │  │  Telegram   │     │
-│  └─────────────┘  └─────────────┘  └─────────────┘     │
-└─────────────────────────────────────────────────────────┘
-         │
-         │ HTTP/WS
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│                    WEB DASHBOARD                        │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐       │
-│  │  Chat   │ │   Org   │ │  Cron   │ │ Workflows│       │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘       │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐       │
-│  │Sessions │ │ Memory  │ │ Honcho  │ │  Wiki   │       │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘       │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         JINN GATEWAY                            │
+│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │                    ENGINE LAYER                            │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐     │ │
+│  │  │  Claude  │ │  Codex   │ │  Gemini  │ │  Ollama  │     │ │
+│  │  │   Code   │ │   SDK    │ │   CLI    │ │  local   │     │ │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘     │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│                              │                                  │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │              HERMES FEATURE LAYER (optional)               │ │
+│  │  Memory · Skills · Honcho · Wiki · Session History         │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│                              │                                  │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │           SESSION MANAGER + ORG SYSTEM                     │ │
+│  │  Routing · Queue · Cron · Departments · Task Boards        │ │
+│  └───────────────────────────────────────────────────────────┘ │
+│                              │                                  │
+│  ┌───────────────────────────────────────────────────────────┐ │
+│  │                    CONNECTORS                              │ │
+│  │  Slack · Discord · Telegram · WhatsApp · Webhooks          │ │
+│  └───────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                         HTTP/WS API
+                               │
+┌─────────────────────────────────────────────────────────────────┐
+│                      WEB DASHBOARD                              │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐             │
+│  │  Chat   │ │   Org   │ │  Cron   │ │ Workflows │             │
+│  └─────────┘ └─────────┘ └─────────┘ └───────────┘             │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐             │
+│  │Sessions │ │ Memory  │ │ Honcho  │ │   Wiki    │  ← Hermes   │
+│  └─────────┘ └─────────┘ └─────────┘ └───────────┘    features │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
