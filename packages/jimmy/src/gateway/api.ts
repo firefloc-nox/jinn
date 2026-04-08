@@ -1906,6 +1906,7 @@ Handle this as a priority request from a colleague.`;
       const KNOWN_KEYS = [
         "jinn",
         "gateway",
+        "routing",
         "engines",
         "connectors",
         "logging",

@@ -29,7 +29,7 @@ import { loadJobs } from "../cron/jobs.js";
 import { setCronJobEnabled, triggerCronJob } from "../cron/scheduler.js";
 import { checkBudget } from "../gateway/budgets.js";
 import { resolveMcpServers, writeMcpConfigFile, cleanupMcpConfigFile } from "../mcp/resolver.js";
-import { DEFAULT_FALLBACK_POLICY, resolveFallbackExecutor } from "./fallback.js";
+import { DEFAULT_FALLBACK_POLICY, resolveFallbackExecutor, type FallbackPolicy } from "./fallback.js";
 import { getCapabilities } from "../engines/capabilities.js";
 import { mapEmployeeToHermesInput, hermesRunInputToOpts } from "../hermes/profile-mapper.js";
 
@@ -215,8 +215,16 @@ export class SessionManager {
     target: Target,
     employee?: Employee,
   ): Promise<void> {
-    // Resolve runtime via runtimeRef fallback chain — legacy `brain` policy remains as a compat alias.
-    const fallbackPolicy = this.config.brain ?? DEFAULT_FALLBACK_POLICY;
+    // Resolve runtime via runtimeRef fallback chain.
+    // Prefer new `routing` schema; fall back to legacy `brain` for compat.
+    const fallbackPolicy: FallbackPolicy = this.config.routing
+      ? {
+          primary: this.config.routing.defaultRuntime ?? "hermes",
+          fallbacks: this.config.routing.fallbackRuntimes ?? ["claude", "codex", "gemini"],
+          fallbackOnUnavailable: true,
+          fallbackOnHardFailure: true,
+        }
+      : this.config.brain ?? DEFAULT_FALLBACK_POLICY;
     const requestedRuntime = session.engine;
     const availableEngines = new Set(this.engines.keys());
     const { runtimeRef: resolvedRuntimeRef, executor: resolvedEngine, fallbackUsed, fallbackReason } = resolveFallbackExecutor(

@@ -137,7 +137,18 @@ export class HermesEngine implements InterruptibleEngine {
         `[HermesEngine] WebAPI available at ${WEBAPI_CONFIG.host}:${WEBAPI_CONFIG.port} — using HTTP transport`,
       );
       try {
-        return await runViaWebAPI(webapi, opts, startMs);
+        const webResult = await runViaWebAPI(webapi, opts, startMs);
+        // Guardrail: some providers/endpoints can yield an empty WebAPI assistant result
+        // even though the HTTP transport itself succeeded. Treat that as a transport failure
+        // and fall back to the proven CLI path so Jinn does not silently swallow replies.
+        if (!webResult.result?.trim()) {
+          HermesWebAPITransport.invalidateAvailabilityCache();
+          logger.warn(
+            `[HermesEngine] WebAPI returned empty result — falling back to CLI spawn`,
+          );
+        } else {
+          return webResult;
+        }
       } catch (err) {
         // Si le transport WebAPI échoue en cours d'exécution, invalider le cache
         // et passer au fallback CLI pour ne pas perdre la requête.
@@ -182,16 +193,17 @@ export class HermesEngine implements InterruptibleEngine {
     const resolvedModel = resolveHermesModel(opts.model);
     if (resolvedModel) args.push("--model", resolvedModel);
     if (opts.hermesProvider) args.push("--provider", opts.hermesProvider);
+    const cliResumeSessionId = opts.resumeSessionId?.startsWith("sess_") ? undefined : opts.resumeSessionId;
     if (opts.hermesProfile) args.push("--profile", opts.hermesProfile);
     if (opts.hermesToolsets) args.push("--toolsets", opts.hermesToolsets);
     if (opts.hermesSkills) args.push("--skills", opts.hermesSkills);
     if (opts.hermesPassSessionId) args.push("--pass-session-id");
-    if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
+    if (cliResumeSessionId) args.push("--resume", cliResumeSessionId);
 
     logger.info(
       `[HermesEngine/CLI] Starting: ${bin} chat -q [prompt] --quiet --source tool --yolo` +
       ` --model ${resolvedModel || "default"}` +
-      ` (resume: ${opts.resumeSessionId || "none"})` +
+      ` (resume: ${cliResumeSessionId || "none"})` +
       (opts.hermesProvider ? ` --provider ${opts.hermesProvider}` : "") +
       (opts.hermesProfile ? ` --profile ${opts.hermesProfile}` : "") +
       (opts.hermesToolsets ? ` --toolsets ${opts.hermesToolsets}` : "") +
