@@ -1,8 +1,9 @@
 /**
- * HonchoConnector — Jinn connector for the Honcho v3 API.
+ * HonchoConnector — Jinn service connector for the Honcho v3 API.
+ * Note: This is a service connector, not a messaging connector.
+ * It does not implement the full Connector interface.
  */
 
-import type { Connector } from "../../shared/types.js";
 import { HonchoClient, resolveHonchoUrl, type HonchoConclusion, type HonchoWorkspace, type HonchoConclusionList } from "./client.js";
 import { logger } from "../../shared/logger.js";
 
@@ -14,7 +15,7 @@ export {
   type HonchoConclusionList,
 } from "./client.js";
 
-export class HonchoConnector implements Connector {
+export class HonchoConnector {
   name = "honcho";
 
   private readonly client: HonchoClient;

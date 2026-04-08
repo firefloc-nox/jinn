@@ -68,6 +68,7 @@ import { handleFilesRequest, ensureFilesDir } from "./files.js";
 import { notifyParentSession, notifyRateLimited, notifyRateLimitResumed, notifyDiscordChannel } from "../sessions/callbacks.js";
 import { loadInstances } from "../cli/instances.js";
 import type { HermesDataConnector } from "../connectors/hermes/index.js";
+import type { HonchoConnector } from "../connectors/honcho/index.js";
 
 export interface ApiContext {
   config: JinnConfig;
@@ -2710,6 +2711,73 @@ Handle this as a priority request from a colleague.`;
       }
     }
 
+    // ── Honcho API proxy routes (/api/honcho/*) ────────────────────────────────
+
+    // GET /api/honcho/health
+    if (method === "GET" && pathname === "/api/honcho/health") {
+      const honchoConnector = getHonchoConnector(context);
+      if (!requireHoncho(res, honchoConnector)) return;
+      return json(res, { status: "ok" });
+    }
+
+    // GET /api/honcho/workspaces
+    if (method === "GET" && pathname === "/api/honcho/workspaces") {
+      const honchoConnector = getHonchoConnector(context);
+      if (!requireHoncho(res, honchoConnector)) return;
+      const result = await honchoConnector.listWorkspaces();
+      // result is already {items: [...]} format from client
+      return json(res, { workspaces: result });
+    }
+
+    // GET /api/honcho/workspaces/:id/memory
+    params = matchRoute("/api/honcho/workspaces/:id/memory", pathname);
+    if (method === "GET" && params) {
+      const honchoConnector = getHonchoConnector(context);
+      if (!requireHoncho(res, honchoConnector)) return;
+      const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : 100;
+      const offset = url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset")!, 10) : 0;
+      const result = await honchoConnector.listConclusions(params.id, { limit, offset });
+      return json(res, { items: result.items, total: result.total });
+    }
+
+    // POST /api/honcho/workspaces/:id/search
+    params = matchRoute("/api/honcho/workspaces/:id/search", pathname);
+    if (method === "POST" && params) {
+      const honchoConnector = getHonchoConnector(context);
+      if (!requireHoncho(res, honchoConnector)) return;
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as Record<string, unknown>;
+      const query = (body?.query ?? body?.q ?? "") as string;
+      const topK = (body?.top_k ?? 20) as number;
+      const items = await honchoConnector.queryConclusions(params.id, query, topK);
+      return json(res, { items });
+    }
+
+    // DELETE /api/honcho/workspaces/:workspaceId/conclusions/:conclusionId
+    params = matchRoute("/api/honcho/workspaces/:workspaceId/conclusions/:conclusionId", pathname);
+    if (method === "DELETE" && params) {
+      const honchoConnector = getHonchoConnector(context);
+      if (!requireHoncho(res, honchoConnector)) return;
+      await honchoConnector.deleteConclusion(params.workspaceId, params.conclusionId);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // POST /api/honcho/workspaces/:id/conclusions
+    params = matchRoute("/api/honcho/workspaces/:id/conclusions", pathname);
+    if (method === "POST" && params) {
+      const honchoConnector = getHonchoConnector(context);
+      if (!requireHoncho(res, honchoConnector)) return;
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as Record<string, unknown>;
+      const conclusions = Array.isArray(body?.conclusions) ? body.conclusions : [body];
+      const items = await honchoConnector.createConclusions(params.id, conclusions);
+      return json(res, { items });
+    }
+
     return notFound(res);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -2722,6 +2790,25 @@ Handle this as a priority request from a colleague.`;
 
 function getHermesConnector(context: ApiContext): HermesDataConnector | null {
   return (context.connectors.get("hermes-data") as HermesDataConnector) ?? null;
+}
+
+// ── Honcho connector helpers ─────────────────────────────────────────────────
+
+function getHonchoConnector(context: ApiContext): HonchoConnector | null {
+  const connector = context.connectors.get("honcho");
+  if (!connector) return null;
+  return connector as unknown as HonchoConnector;
+}
+
+function requireHoncho(
+  res: ServerResponse,
+  connector: HonchoConnector | null,
+): connector is HonchoConnector {
+  if (!connector || !connector.isHealthy()) {
+    json(res, { error: "Honcho unavailable" }, 503);
+    return false;
+  }
+  return true;
 }
 
 function requireHermes(

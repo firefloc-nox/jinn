@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { PageLayout } from "@/components/page-layout"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -152,7 +152,7 @@ export default function HonchoMemoryPage() {
   const [debouncedQuery, setDebouncedQuery] = useState("")
 
   // Debounce search
-  useMemo(() => {
+  useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
     return () => clearTimeout(timer)
   }, [searchQuery])
@@ -160,7 +160,7 @@ export default function HonchoMemoryPage() {
   const { workspaces, loading: loadingWorkspaces, unavailable } = useHonchoWorkspaces()
 
   // Auto-select first workspace
-  useMemo(() => {
+  useEffect(() => {
     if (!selectedWorkspace && workspaces.length > 0) {
       setSelectedWorkspace(workspaces[0].id)
     }
@@ -182,76 +182,85 @@ export default function HonchoMemoryPage() {
   const isLoading = loadingWorkspaces || loadingMemory || loadingSearch
 
   return (
-    <PageLayout
-      title="Honcho Memory"
-      description="View and manage cross-session memory stored in Honcho"
-      icon={<Brain className="h-5 w-5" />}
-      badge={<StatusBadge />}
-    >
-      {unavailable ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium">Honcho Unavailable</h3>
-          <p className="text-sm text-muted-foreground mt-1">
-            Could not connect to Honcho service. Make sure it is running on port 8000.
+    <PageLayout>
+      <div className="h-full overflow-auto p-6">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <Brain className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-semibold">Honcho Memory</h1>
+            <StatusBadge />
+          </div>
+          <p className="text-muted-foreground">
+            View and manage cross-session memory stored in Honcho
           </p>
         </div>
-      ) : (
-        <div className="space-y-4">
-          {/* Toolbar */}
-          <div className="flex items-center gap-3">
-            <WorkspaceSelector
-              workspaces={workspaces}
-              selected={selectedWorkspace}
-              onSelect={setSelectedWorkspace}
-            />
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search memories…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm"
+
+        {unavailable ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium">Honcho Unavailable</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Could not connect to Honcho service. Make sure it is running on port 8000.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Toolbar */}
+            <div className="flex items-center gap-3">
+              <WorkspaceSelector
+                workspaces={workspaces}
+                selected={selectedWorkspace}
+                onSelect={setSelectedWorkspace}
               />
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search memories…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm"
+                />
+              </div>
+              {!debouncedQuery && (
+                <span className="text-sm text-muted-foreground">
+                  {total} conclusion{total !== 1 ? "s" : ""}
+                </span>
+              )}
             </div>
-            {!debouncedQuery && (
-              <span className="text-sm text-muted-foreground">
-                {total} conclusion{total !== 1 ? "s" : ""}
-              </span>
+
+            {/* Content */}
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : displayedItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Database className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium">
+                  {debouncedQuery ? "No results" : "No memories yet"}
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {debouncedQuery
+                    ? "Try a different search query"
+                    : "Conclusions will appear here as Hermes learns about users"}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {displayedItems.map((conclusion) => (
+                  <ConclusionCard
+                    key={conclusion.id}
+                    conclusion={conclusion}
+                    onDelete={deleteConclusion}
+                  />
+                ))}
+              </div>
             )}
           </div>
-
-          {/* Content */}
-          {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : displayedItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Database className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium">
-                {debouncedQuery ? "No results" : "No memories yet"}
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {debouncedQuery
-                  ? "Try a different search query"
-                  : "Conclusions will appear here as Hermes learns about users"}
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {displayedItems.map((conclusion) => (
-                <ConclusionCard
-                  key={conclusion.id}
-                  conclusion={conclusion}
-                  onDelete={deleteConclusion}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </PageLayout>
   )
 }

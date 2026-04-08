@@ -412,12 +412,14 @@ export async function startGateway(
   }
 
   // Register HonchoConnector — toujours si hermes est configuré (Honcho is Hermes' memory backend)
+  // Start Honcho service connector (separate from messaging connectors)
   if (config.engines.hermes) {
     try {
       const honchoConnector = new HonchoConnector();
       await honchoConnector.start();
-      connectors.push(honchoConnector);
-      connectorMap.set("honcho", honchoConnector);
+      // Don't push to connectors array (it's for messaging connectors)
+      // but add to connectorMap for API access
+      (connectorMap as Map<string, unknown>).set("honcho", honchoConnector);
     } catch (err) {
       logger.error(`Failed to start HonchoConnector: ${err instanceof Error ? err.message : err}`);
     }

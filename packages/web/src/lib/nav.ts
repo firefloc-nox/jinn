@@ -11,6 +11,7 @@ import {
   Brain,
   BookOpen,
   GitBranch,
+  Database,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -35,5 +36,6 @@ export const NAV_ITEMS: NavItem[] = [
   // Hermes section
   { href: "/hermes/sessions", label: "H · Sessions", icon: History, group: "hermes" },
   { href: "/hermes/memory", label: "H · Memory", icon: Brain, group: "hermes" },
+  { href: "/hermes/honcho", label: "H · Honcho", icon: Database, group: "hermes" },
   { href: "/hermes/skills", label: "H · Skills", icon: BookOpen, group: "hermes" },
 ]

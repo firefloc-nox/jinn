@@ -52,40 +52,52 @@ export class HonchoUnavailableError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// API client
+// API client - Direct Honcho V3 API
 // ---------------------------------------------------------------------------
-
-const JINN_API = process.env.NEXT_PUBLIC_JINN_API || "http://127.0.0.1:7778"
+// Jinn API proxy (avoids CORS issues)
+const API_BASE = "/api/honcho"
 
 export const honchoApi = {
   async getHealth(): Promise<{ status: string }> {
-    const res = await fetch(`${JINN_API}/api/honcho/health`)
-    if (!res.ok) throw new HonchoUnavailableError()
-    return res.json()
+    try {
+      const res = await fetch(`${API_BASE}/health`)
+      if (!res.ok) throw new HonchoUnavailableError()
+      return res.json()
+    } catch {
+      throw new HonchoUnavailableError()
+    }
   },
 
   async getWorkspaces(): Promise<HonchoWorkspacesResponse> {
-    const res = await fetch(`${JINN_API}/api/honcho/workspaces`)
+    const res = await fetch(`${API_BASE}/workspaces`)
     if (!res.ok) throw new HonchoUnavailableError()
-    return res.json()
+    const data = await res.json()
+    // Handle nested format: {workspaces: {items: [...]}} or {workspaces: [...]}
+    const workspaces = Array.isArray(data.workspaces) 
+      ? data.workspaces 
+      : (data.workspaces?.items || [])
+    return { workspaces }
   },
 
   async getMemory(workspaceId: string): Promise<HonchoMemoryResponse> {
-    const res = await fetch(`${JINN_API}/api/honcho/workspaces/${workspaceId}/memory`)
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/memory?limit=100`)
     if (!res.ok) throw new HonchoUnavailableError()
     return res.json()
   },
 
   async queryMemory(workspaceId: string, query: string): Promise<HonchoSearchResponse> {
-    const params = new URLSearchParams({ q: query })
-    const res = await fetch(`${JINN_API}/api/honcho/workspaces/${workspaceId}/search?${params}`)
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, top_k: 20 }),
+    })
     if (!res.ok) throw new HonchoUnavailableError()
     return res.json()
   },
 
   async deleteMemory(workspaceId: string, conclusionId: string): Promise<void> {
     const res = await fetch(
-      `${JINN_API}/api/honcho/workspaces/${workspaceId}/conclusions/${conclusionId}`,
+      `${API_BASE}/workspaces/${workspaceId}/conclusions/${conclusionId}`,
       { method: "DELETE" }
     )
     if (!res.ok) throw new HonchoUnavailableError()
@@ -95,7 +107,7 @@ export const honchoApi = {
     workspaceId: string,
     conclusions: CreateConclusionInput[]
   ): Promise<{ items: HonchoConclusion[] }> {
-    const res = await fetch(`${JINN_API}/api/honcho/workspaces/${workspaceId}/conclusions`, {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/conclusions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conclusions }),
