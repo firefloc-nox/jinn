@@ -12,6 +12,7 @@ import {
   BookOpen,
   GitBranch,
   Database,
+  Library,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -38,4 +39,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/hermes/memory", label: "H · Memory", icon: Brain, group: "hermes" },
   { href: "/hermes/honcho", label: "H · Honcho", icon: Database, group: "hermes" },
   { href: "/hermes/skills", label: "H · Skills", icon: BookOpen, group: "hermes" },
+  { href: "/hermes/wiki", label: "H · Wiki", icon: Library, group: "hermes" },
 ]

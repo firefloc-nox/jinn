@@ -78,3 +78,41 @@ audio_cache/
 # Temp files
 tmp/
 .tmp/
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Security & Secrets (NEVER commit these)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# API keys and secrets
+*.key
+*.pem
+*.p12
+secrets/
+.secrets/
+
+# Auth tokens (Hermes, Honcho, etc.)
+auth.json
+*.token
+
+# Local configuration with secrets
+config.local.yaml
+config.local.json
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Personal/Fork-specific (not for upstream)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Personal wiki content (user's knowledge bases, not project code)
+# Note: ~/wiki and ~/wiki-* are user data, not tracked
+# But packages/web/src/app/hermes/wiki/ IS project code
+
+# Hermes data (lives in ~/.hermes, not project)
+.hermes/
+
+# Session transcripts
+transcripts/
+
+# Personal notes
+NOTES.md
+TODO.local.md
+scratch/

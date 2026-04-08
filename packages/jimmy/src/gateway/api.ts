@@ -258,8 +258,8 @@ function json(res: ServerResponse, data: unknown, status = 200): void {
   res.end(JSON.stringify(data));
 }
 
-function notFound(res: ServerResponse): void {
-  json(res, { error: "Not found" }, 404);
+function notFound(res: ServerResponse, message = "Not found"): void {
+  json(res, { error: message }, 404);
 }
 
 function badRequest(res: ServerResponse, message: string): void {
@@ -2613,23 +2613,25 @@ Handle this as a priority request from a colleague.`;
     }
 
     // GET /api/hermes/sessions
+    // Note: These session endpoints use direct SQLite access to state.db
+    // because the Hermes WebAPI doesn't expose /api/sessions
     if (method === "GET" && pathname === "/api/hermes/sessions") {
       const hermesConnector = getHermesConnector(context);
-      if (!requireHermes(res, hermesConnector)) return;
+      if (!requireHermesConnector(res, hermesConnector)) return;
       const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined;
       const offset = url.searchParams.get("offset") ? parseInt(url.searchParams.get("offset")!, 10) : undefined;
       const source = url.searchParams.get("source") ?? undefined;
-      const result = await hermesConnector.getClient().getSessions({ limit, offset, source });
+      const result = hermesConnector.getSessions({ limit, offset, source });
       return json(res, result);
     }
 
     // GET /api/hermes/sessions/search
     if (method === "GET" && pathname === "/api/hermes/sessions/search") {
       const hermesConnector = getHermesConnector(context);
-      if (!requireHermes(res, hermesConnector)) return;
+      if (!requireHermesConnector(res, hermesConnector)) return;
       const q = url.searchParams.get("q") ?? "";
       const limit = url.searchParams.get("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined;
-      const result = await hermesConnector.getClient().searchSessions(q, limit);
+      const result = hermesConnector.searchSessions(q, limit);
       return json(res, result);
     }
 
@@ -2637,25 +2639,29 @@ Handle this as a priority request from a colleague.`;
     params = matchRoute("/api/hermes/sessions/:id/messages", pathname);
     if (method === "GET" && params) {
       const hermesConnector = getHermesConnector(context);
-      if (!requireHermes(res, hermesConnector)) return;
-      const messages = await hermesConnector.getClient().getMessages(params.id);
-      return json(res, messages);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const messages = hermesConnector.getMessages(params.id);
+      return json(res, { items: messages });
     }
 
     // GET /api/hermes/sessions/:id
     params = matchRoute("/api/hermes/sessions/:id", pathname);
     if (method === "GET" && params) {
       const hermesConnector = getHermesConnector(context);
-      if (!requireHermes(res, hermesConnector)) return;
-      const session = await hermesConnector.getClient().getSession(params.id);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const session = hermesConnector.getSession(params.id);
+      if (!session) {
+        return json(res, { error: "Session not found" }, 404);
+      }
       return json(res, session);
     }
 
     // GET /api/hermes/memory
+    // Note: Uses filesystem fallback since WebAPI doesn't expose /api/memory
     if (method === "GET" && pathname === "/api/hermes/memory") {
       const hermesConnector = getHermesConnector(context);
-      if (!requireHermes(res, hermesConnector)) return;
-      const memory = await hermesConnector.getClient().getMemory();
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const memory = hermesConnector.getMemory();
       return json(res, memory);
     }
 
@@ -2679,11 +2685,98 @@ Handle this as a priority request from a colleague.`;
     }
 
     // GET /api/hermes/skills
+    // Note: Uses filesystem fallback since WebAPI doesn't expose /api/skills
     if (method === "GET" && pathname === "/api/hermes/skills") {
       const hermesConnector = getHermesConnector(context);
-      if (!requireHermes(res, hermesConnector)) return;
-      const skills = await hermesConnector.getClient().getSkills();
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const skills = hermesConnector.getSkills();
       return json(res, skills);
+    }
+
+    // ── LLM Wiki routes (/api/hermes/wiki/*) ──────────────────────────────────
+
+    // GET /api/hermes/wikis — list all available wikis
+    if (method === "GET" && pathname === "/api/hermes/wikis") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const wikis = hermesConnector.discoverWikis();
+      const activePath = hermesConnector.getActiveWikiPath();
+      return json(res, { wikis, activePath });
+    }
+
+    // POST /api/hermes/wikis/switch — switch active wiki
+    if (method === "POST" && pathname === "/api/hermes/wikis/switch") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as { path?: string };
+      if (!body || typeof body.path !== "string") {
+        return badRequest(res, "Missing path in request body");
+      }
+      const success = hermesConnector.setActiveWiki(body.path);
+      if (!success) {
+        return badRequest(res, "Invalid wiki path or wiki not found");
+      }
+      return json(res, { success: true, activePath: hermesConnector.getActiveWikiPath() });
+    }
+
+    // GET /api/hermes/wiki — overview (index, schema, stats, recent log)
+    if (method === "GET" && pathname === "/api/hermes/wiki") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const overview = hermesConnector.getWikiOverview();
+      return json(res, overview);
+    }
+
+    // GET /api/hermes/wiki/pages — list all pages with metadata
+    if (method === "GET" && pathname === "/api/hermes/wiki/pages") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const pages = hermesConnector.getWikiPages();
+      return json(res, { pages, count: pages.length });
+    }
+
+    // GET /api/hermes/wiki/search?q=query — search wiki content
+    if (method === "GET" && pathname === "/api/hermes/wiki/search") {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const q = url.searchParams.get("q") || "";
+      if (!q.trim()) {
+        return json(res, { results: [], query: q });
+      }
+      const results = hermesConnector.searchWiki(q);
+      return json(res, { results, query: q });
+    }
+
+    // GET /api/hermes/wiki/page/* — get specific page content
+    if (method === "GET" && pathname.startsWith("/api/hermes/wiki/page/")) {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const pagePath = pathname.replace("/api/hermes/wiki/page/", "");
+      const page = hermesConnector.getWikiPage(decodeURIComponent(pagePath));
+      if (!page.exists) {
+        return notFound(res, `Wiki page not found: ${pagePath}`);
+      }
+      return json(res, { path: pagePath, content: page.content });
+    }
+
+    // PUT /api/hermes/wiki/page/* — save/update page content
+    if (method === "PUT" && pathname.startsWith("/api/hermes/wiki/page/")) {
+      const hermesConnector = getHermesConnector(context);
+      if (!requireHermesConnector(res, hermesConnector)) return;
+      const pagePath = pathname.replace("/api/hermes/wiki/page/", "");
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as { content?: string };
+      if (!body || typeof body.content !== "string") {
+        return badRequest(res, "Missing content in request body");
+      }
+      const result = hermesConnector.saveWikiPage(decodeURIComponent(pagePath), body.content);
+      if (!result.success) {
+        return serverError(res, result.error || "Failed to save page");
+      }
+      return json(res, { success: true, path: pagePath });
     }
 
     // GET /api/hermes/models
@@ -2817,6 +2910,18 @@ function requireHermes(
 ): connector is HermesDataConnector {
   if (!connector || !connector.isHealthy()) {
     json(res, { error: "Hermes WebAPI unavailable" }, 503);
+    return false;
+  }
+  return true;
+}
+
+/** Like requireHermes but doesn't check WebAPI health — for SQLite-based endpoints */
+function requireHermesConnector(
+  res: ServerResponse,
+  connector: HermesDataConnector | null,
+): connector is HermesDataConnector {
+  if (!connector) {
+    json(res, { error: "Hermes connector not available" }, 503);
     return false;
   }
   return true;
