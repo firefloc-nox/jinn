@@ -37,6 +37,35 @@ export interface BrainPolicy {
   fallbacks: RuntimeRef[];
 }
 
+/**
+ * OpenRouter-style model fallback chain configuration.
+ * When the primary model hits rate limits or errors, try each model in order.
+ */
+export interface FallbackChainConfig {
+  /** Ordered list of model identifiers to try (e.g., ["anthropic/claude-sonnet-4", "openai/gpt-4o"]) */
+  models: string[];
+  /** Whether to trigger fallback on rate limit errors (default: true) */
+  retryOnRateLimit?: boolean;
+  /** Whether to trigger fallback on other transient errors (default: false) */
+  retryOnError?: boolean;
+}
+
+/**
+ * Routing configuration for the bus-not-brain model.
+ * Supports runtime-level and model-level fallback chains.
+ */
+export interface RoutingConfig {
+  /** Default runtime to use when no explicit runtime is specified */
+  defaultRuntime?: RuntimeRef;
+  /** Ordered fallback runtimes when the default is unavailable */
+  fallbackRuntimes?: RuntimeRef[];
+  /**
+   * Model-level fallback chain for OpenRouter-style rate limit handling.
+   * When a model hits rate limits, try the next model in the chain.
+   */
+  fallbackChain?: FallbackChainConfig;
+}
+
 export interface StreamDelta {
   type: StreamDeltaType;
   content: string;
@@ -166,6 +195,14 @@ export interface BrainRoutingMeta {
   fallbackUsed: boolean;
   /** Human-readable reason for the fallback, if applicable */
   fallbackReason?: string;
+  /** Model that was originally requested (before any model-level fallback) */
+  requestedModel?: string;
+  /** Model that was actually used after fallback chain resolution */
+  resolvedModel?: string;
+  /** Whether a model-level fallback was triggered (rate limit, error) */
+  modelFallbackUsed?: boolean;
+  /** Index in the fallback chain that was used (0 = primary model) */
+  modelFallbackIndex?: number;
 }
 
 export interface EngineRateLimitInfo {
@@ -558,10 +595,7 @@ export interface JinnConfig {
   jinn?: { version?: string };
   gateway: { port: number; host: string; streaming?: boolean };
   /** Canonical routing config for the bus-not-brain model. */
-  routing?: {
-    defaultRuntime?: RuntimeRef;
-    fallbackRuntimes?: RuntimeRef[];
-  };
+  routing?: RoutingConfig;
   /**
    * Legacy alias kept during migration. Maps conceptually to routing.defaultRuntime/fallbackRuntimes.
    */
