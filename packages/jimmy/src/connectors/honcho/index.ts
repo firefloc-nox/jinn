@@ -50,6 +50,13 @@ export class HonchoConnector {
     return this.client.healthy;
   }
 
+  getHealth(): { status: string; detail?: string } {
+    return {
+      status: this.client.healthy ? "running" : "error",
+      detail: this.client.healthy ? undefined : "Honcho API not reachable",
+    };
+  }
+
   getClient(): HonchoClient {
     return this.client;
   }
