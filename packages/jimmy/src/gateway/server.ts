@@ -32,6 +32,7 @@ import { loadJobs } from "../cron/jobs.js";
 import { startScheduler, reloadScheduler, stopScheduler } from "../cron/scheduler.js";
 import { scanOrg } from "./org.js";
 import { HermesDataConnector } from "../connectors/hermes/index.js";
+import { HonchoConnector } from "../connectors/honcho/index.js";
 import { gatewayEventBus } from "./event-bus.js";
 
 
@@ -407,6 +408,18 @@ export async function startGateway(
       connectorMap.set("hermes-data", hermesData);
     } catch (err) {
       logger.error(`Failed to start HermesDataConnector: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  // Register HonchoConnector — toujours si hermes est configuré (Honcho is Hermes' memory backend)
+  if (config.engines.hermes) {
+    try {
+      const honchoConnector = new HonchoConnector();
+      await honchoConnector.start();
+      connectors.push(honchoConnector);
+      connectorMap.set("honcho", honchoConnector);
+    } catch (err) {
+      logger.error(`Failed to start HonchoConnector: ${err instanceof Error ? err.message : err}`);
     }
   }
 
