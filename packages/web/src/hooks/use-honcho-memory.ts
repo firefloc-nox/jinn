@@ -8,7 +8,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 
 export interface HonchoWorkspace {
   id: string
-  name: string
+  name?: string
+  metadata?: Record<string, unknown>
+  configuration?: Record<string, unknown>
+  created_at?: string
 }
 
 export interface HonchoConclusion {

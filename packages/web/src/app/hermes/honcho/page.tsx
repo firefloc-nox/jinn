@@ -63,7 +63,7 @@ function WorkspaceSelector({
   selected,
   onSelect,
 }: {
-  workspaces: { id: string; name: string }[]
+  workspaces: { id: string; name?: string }[]
   selected: string | null
   onSelect: (id: string) => void
 }) {
@@ -77,7 +77,7 @@ function WorkspaceSelector({
     >
       {workspaces.map((ws) => (
         <option key={ws.id} value={ws.id}>
-          {ws.name}
+          {ws.name ?? ws.id}
         </option>
       ))}
     </select>
