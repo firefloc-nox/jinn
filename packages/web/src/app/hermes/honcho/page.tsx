@@ -163,10 +163,11 @@ export default function HonchoMemoryPage() {
   // Defensive: ensure workspaces is always an array
   const workspaces = Array.isArray(rawWorkspaces) ? rawWorkspaces : []
 
-  // Auto-select first workspace
+  // Auto-select "hermes" workspace if exists, otherwise first
   useEffect(() => {
     if (!selectedWorkspace && workspaces.length > 0) {
-      setSelectedWorkspace(workspaces[0].id)
+      const hermesWs = workspaces.find(ws => ws.id === 'hermes')
+      setSelectedWorkspace(hermesWs?.id ?? workspaces[0].id)
     }
   }, [workspaces, selectedWorkspace])
 

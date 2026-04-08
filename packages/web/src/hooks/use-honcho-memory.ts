@@ -24,9 +24,15 @@ export interface HonchoConclusion {
   metadata?: Record<string, unknown>
 }
 
+// API returns nested format: { items: { items: [...], total: N, page: N, ... } }
 export interface HonchoMemoryResponse {
-  items: HonchoConclusion[]
-  total: number
+  items: {
+    items: HonchoConclusion[]
+    total: number
+    page?: number
+    size?: number
+    pages?: number
+  }
 }
 
 export interface HonchoWorkspacesResponse {
@@ -183,7 +189,7 @@ export function useHonchoMemory(workspaceId: string | null) {
 
   const { data, isLoading } = useQuery({
     queryKey: workspaceId ? honchoKeys.memory(workspaceId) : ["honcho", "memory", "disabled"],
-    queryFn: () => (workspaceId ? honchoApi.getMemory(workspaceId) : Promise.resolve({ items: [], total: 0 })),
+    queryFn: () => (workspaceId ? honchoApi.getMemory(workspaceId) : Promise.resolve({ items: { items: [], total: 0 } })),
     enabled: !!workspaceId,
     staleTime: 30_000,
     retry: 1,
@@ -209,9 +215,13 @@ export function useHonchoMemory(workspaceId: string | null) {
     },
   })
 
+  // Extract from nested response: { items: { items: [...], total: N } }
+  const items = data?.items?.items ?? []
+  const total = data?.items?.total ?? 0
+  
   return {
-    conclusions: workspaceId ? (data?.items ?? []) : [],
-    total: data?.total ?? 0,
+    conclusions: workspaceId ? items : [],
+    total,
     loading: isLoading,
     deleteConclusion: (id: string) => deleteMutation.mutateAsync(id),
     createConclusion: (conclusions: CreateConclusionInput[]) => createMutation.mutateAsync(conclusions),
