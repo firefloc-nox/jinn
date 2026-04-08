@@ -33,6 +33,7 @@ import {
   trimSessionEvents,
 } from "../sessions/registry.js";
 import { forkEngineSession } from "../sessions/fork.js";
+import { exportSession, type ExportFormat } from "../sessions/export.js";
 import {
   CONFIG_PATH,
   CRON_JOBS,
@@ -50,7 +51,7 @@ import { resolveEffort } from "../shared/effort.js";
 import { computeNextRetryDelayMs, computeRateLimitDeadlineMs, detectRateLimit } from "../shared/rateLimit.js";
 import { getClaudeExpectedResetAt, recordClaudeRateLimit } from "../shared/usageAwareness.js";
 import { loadJobs, saveJobs } from "../cron/jobs.js";
-import { reloadScheduler } from "../cron/scheduler.js";
+import { reloadScheduler, setCronJobEnabled } from "../cron/scheduler.js";
 import { runCronJob } from "../cron/runner.js";
 import {
   loadHermesJobs,
@@ -829,6 +830,36 @@ export async function handleApiRequest(
       return json(res, entries);
     }
 
+    // GET /api/sessions/:id/export — export session transcript in markdown, json, or txt format
+    params = matchRoute("/api/sessions/:id/export", pathname);
+    if (method === "GET" && params) {
+      const formatParam = url.searchParams.get("format") || "markdown";
+      const validFormats = ["markdown", "json", "txt"];
+      if (!validFormats.includes(formatParam)) {
+        return badRequest(res, `Invalid format. Must be one of: ${validFormats.join(", ")}`);
+      }
+      const format = formatParam as ExportFormat;
+      const exported = exportSession(params.id, format);
+      if (exported === null) return notFound(res);
+
+      // Set appropriate content type and filename for download
+      const contentTypes: Record<ExportFormat, string> = {
+        markdown: "text/markdown",
+        json: "application/json",
+        txt: "text/plain",
+      };
+      const extensions: Record<ExportFormat, string> = {
+        markdown: "md",
+        json: "json",
+        txt: "txt",
+      };
+      res.setHeader("Content-Type", `${contentTypes[format]}; charset=utf-8`);
+      res.setHeader("Content-Disposition", `attachment; filename="session-${params.id.slice(0, 8)}.${extensions[format]}"`);
+      res.writeHead(200);
+      res.end(exported);
+      return;
+    }
+
     // POST /api/sessions/stub — create a session with a pre-populated assistant
     // message but do NOT run the engine. Used for lazy onboarding.
     if (method === "POST" && pathname === "/api/sessions/stub") {
@@ -1235,6 +1266,56 @@ export async function handleApiRequest(
           employee: job.employee,
           message: `Cron job "${job.name}" triggered manually`,
         });
+      }
+    }
+
+    // PATCH /api/cron/jobs/:jobId/enable — enable a cron job
+    params = matchRoute("/api/cron/jobs/:jobId/enable", pathname);
+    if (method === "PATCH" && params) {
+      const targetId = params.jobId;
+
+      if (targetId.startsWith("hermes-")) {
+        // Enable Hermes job
+        const hermesNativeId = targetId.slice(7);
+        const hermesJobs = loadHermesJobs();
+        const hidx = hermesJobs.findIndex((j) => j.id === hermesNativeId);
+        if (hidx === -1) return notFound(res);
+        hermesJobs[hidx].enabled = true;
+        hermesJobs[hidx].state = "scheduled";
+        saveHermesJobs(hermesJobs);
+        logger.info(`[cron] Enabled Hermes job "${hermesJobs[hidx].name}" (${hermesJobs[hidx].id})`);
+        return json(res, hermesJobToJinn(hermesJobs[hidx]) ?? hermesJobs[hidx]);
+      } else {
+        // Enable Jinn job
+        const job = setCronJobEnabled(targetId, true);
+        if (!job) return notFound(res);
+        logger.info(`[cron] Enabled job "${job.name}" (${job.id})`);
+        return json(res, job);
+      }
+    }
+
+    // PATCH /api/cron/jobs/:jobId/disable — disable a cron job
+    params = matchRoute("/api/cron/jobs/:jobId/disable", pathname);
+    if (method === "PATCH" && params) {
+      const targetId = params.jobId;
+
+      if (targetId.startsWith("hermes-")) {
+        // Disable Hermes job
+        const hermesNativeId = targetId.slice(7);
+        const hermesJobs = loadHermesJobs();
+        const hidx = hermesJobs.findIndex((j) => j.id === hermesNativeId);
+        if (hidx === -1) return notFound(res);
+        hermesJobs[hidx].enabled = false;
+        hermesJobs[hidx].state = "paused";
+        saveHermesJobs(hermesJobs);
+        logger.info(`[cron] Disabled Hermes job "${hermesJobs[hidx].name}" (${hermesJobs[hidx].id})`);
+        return json(res, hermesJobToJinn(hermesJobs[hidx]) ?? hermesJobs[hidx]);
+      } else {
+        // Disable Jinn job
+        const job = setCronJobEnabled(targetId, false);
+        if (!job) return notFound(res);
+        logger.info(`[cron] Disabled job "${job.name}" (${job.id})`);
+        return json(res, job);
       }
     }
 
