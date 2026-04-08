@@ -1,18 +1,253 @@
-# 🧞✨ Jinn×Hermes
+# 🧞 Jinn
 
-> **Personal experimental fork** of [Jinn](https://github.com/jinn-ai/jinn) — an AI gateway with deep Hermes integration.
+Lightweight AI gateway daemon orchestrating Claude Code, Codex, and Gemini CLI.
 
-⚠️ **This is a test fork for personal use.** It may contain experimental features, hardcoded paths, and breaking changes. Use the [upstream Jinn](https://github.com/jinn-ai/jinn) for production.
+> **⚠️ Fork Notice:** This is an experimental fork of [Jinn](https://github.com/hristo2612/jinn) with deep Hermes integration. See [Fork Extensions](#-fork-extensions-jinnhermes) below.
+
+<p align="center">
+  <img src="assets/jinn-showcase.gif" alt="Jinn Web Dashboard" width="800" />
+</p>
+
+## What is Jinn?
+
+Jinn is an open-source AI gateway that wraps the Claude Code CLI, Codex SDK,
+and Gemini CLI behind a unified daemon process. It routes tasks to AI engines,
+manages connectors like Slack, and schedules background work via cron. Jinn is
+a bus, not a brain.
+
+## 💡 Why Jinn?
+
+Most AI agent frameworks reinvent the wheel — custom tool-calling loops, brittle context management, hand-rolled retry logic. Then they charge you per API call on top.
+
+**Jinn takes a different approach.** It wraps battle-tested professional CLI tools (Claude Code, Codex, Gemini CLI) and adds only what they're missing: routing, scheduling, connectors, and an org system.
+
+### 🔑 Works with your Anthropic Max subscription
+
+Because Jinn uses **Claude Code CLI under the hood** — Anthropic's own first-party tool — it works with the [$200/mo Max subscription](https://www.anthropic.com/pricing). No per-token API billing. No surprise $500 invoices. Flat rate, unlimited usage.
+
+Other frameworks can't do this. Anthropic [banned third-party tools from using Max subscription OAuth tokens](https://docs.anthropic.com/en/docs/claude-code/bedrock-vertex#max-plan) in January 2026. Since Jinn delegates to the official CLI, it's fully supported.
+
+### 🧞 Jinn vs OpenClaw
+
+| | Jinn | OpenClaw |
+|---|---|---|
+| **Architecture** | Wraps professional CLIs (Claude Code, Codex, Gemini) | Custom agentic loop |
+| **Max subscription** | ✅ Works (uses official Claude Code CLI) | ❌ Banned since Jan 2026 |
+| **Typical cost** | $200/mo flat (Max) or pay-per-use | $300–750/mo API bills ([reported by users](https://www.reddit.com/r/OpenClaw/)) |
+| **Security** | Inherits Claude Code's security model | 512 vulnerabilities found by CrowdStrike |
+| **Memory & context** | Handled natively by Claude Code | Custom implementation with [known context-drop bugs](https://github.com/openclaw/openclaw/issues/5429) |
+| **Cron scheduling** | ✅ Built-in, hot-reloadable | ❌ [Fires in wrong agent context](https://github.com/openclaw/openclaw/issues/16053) |
+| **Slack integration** | ✅ Thread-aware, reaction workflow | ❌ [Drops agent-to-agent messages](https://github.com/openclaw/openclaw/issues/15836) |
+| **Multi-agent org** | Departments, ranks, managers, boards | Flat agent list |
+| **Self-modification** | Agents can edit their own config at runtime | Limited |
+
+### 🧠 The "bus, not brain" philosophy
+
+Jinn adds **zero custom AI logic**. No prompt engineering layer. No opinions on how agents should think. All intelligence comes from the engines themselves — Claude Code already handles tool use, file editing, multi-step reasoning, and memory. Jinn just connects it to the outside world.
+
+When Claude Code gets better, Jinn gets better — automatically.
+
+## ✨ Features
+
+- 🔌 **Triple engine support** — Claude Code CLI + Codex SDK + Gemini CLI
+- 💬 **Connectors** — Slack (threads + reactions), WhatsApp (QR auth), Discord (bot)
+- 📎 **File attachments** — drag & drop files into web chat, passed through to engines
+- 📱 **Mobile-responsive** — collapsible sidebar and mobile-friendly dashboard
+- ⏰ **Cron scheduling** — hot-reloadable background jobs
+- 👥 **AI org system** — departments, ranks, managers, employees, task boards
+- 🌐 **Web dashboard** — chat, org map, kanban, cost tracking, cron visualizer
+- 🔄 **Hot-reload** — change config, cron, or org files without restarting
+- 🛠️ **Self-modification** — agents can edit their own config, skills, and org at runtime
+- 📦 **Skills system** — reusable markdown playbooks that engines follow natively
+- 🏢 **Multi-instance** — run multiple isolated Jinn instances side by side
+- 🔗 **MCP support** — connect to any MCP server
+
+## 🚀 Quick Start
+
+```bash
+npm install -g jinn-cli
+jinn setup
+jinn start
+```
+
+Or install via Homebrew:
+
+```bash
+brew tap hristo2612/jinn https://github.com/hristo2612/jinn
+brew install jinn
+jinn setup
+jinn start
+```
+
+Then open [http://localhost:7777](http://localhost:7777).
+
+## 🏗️ Architecture
+
+```
+                          +----------------+
+                          |   jinn CLI     |
+                          +-------+--------+
+                                  |
+                          +-------v--------+
+                          |    Gateway     |
+                          |    Daemon      |
+                          +--+--+--+--+---+
+                             |  |  |  |
+              +--------------+  |  |  +--------------+
+              |                 |  |                  |
+      +-------v-------+ +------v------+  +-----------v---+
+      |    Engines     | | Connectors  |  |    Web UI     |
+      |Claude|Codex|Gem| | Slack|WA|DC |  | localhost:7777|
+      +----------------+ +-------------+  +---------------+
+              |                 |
+      +-------v-------+ +------v------+
+      |     Cron      | |    Org      |
+      |   Scheduler   | |   System    |
+      +---------------+ +-------------+
+```
+
+The CLI sends commands to the gateway daemon. The daemon dispatches work to AI
+engines (Claude Code, Codex, Gemini CLI), manages connector integrations, runs
+scheduled cron jobs, and serves the web dashboard.
+
+## 🧠 Hermes-first engine
+
+Starting with the Hermes-first refactor, **Hermes is the default brain** when available.
+
+| Engine | Role |
+|--------|------|
+| **Hermes** | Primary brain — MCP-native, session-resumable, default when installed |
+| Claude Code | Fallback #1 — streaming, cost tracking, Max subscription support |
+| Codex | Fallback #2 — OpenAI GPT-based |
+| Gemini CLI | Fallback #3 — Google Gemini |
+
+### How it works
+
+1. `jinn setup` detects if `hermes` is in your PATH (`hermes --version`)
+2. If found, it sets `engines.default: hermes` in `~/.jinn/config.yaml`
+3. The session manager routes all new sessions to Hermes by default
+4. If Hermes is unavailable, the fallback chain is tried in order: `claude → codex → gemini`
+5. Session metadata tracks `requestedBrain`, `actualExecutor`, and `fallbackUsed`
+
+### Config example with Hermes
+
+```yaml
+# Primary brain + fallback policy (optional — defaults to hermes-first)
+brain:
+  primary: hermes
+  fallbacks: [claude, codex, gemini]
+  fallbackOnUnavailable: true
+
+engines:
+  default: hermes
+  hermes:
+    bin: hermes
+    model: default
+  claude:
+    bin: claude
+    model: opus
+  codex:
+    bin: codex
+    model: gpt-5.4
+
+sessions:
+  # Ordered fallback chain used when the primary engine is unavailable
+  fallbackEngines: [claude, codex, gemini]
+```
+
+### Per-employee Hermes profiles
+
+Employees can be configured with Hermes-specific overrides in `org/*.yaml`:
+
+```yaml
+name: backend-agent
+engine: hermes
+hermesProfile: coder        # activate a named Hermes profile
+hermesProvider: anthropic   # provider override (e.g. openrouter)
+model: claude-opus-4        # model hint passed to Hermes
+```
+
+## ⚙️ Configuration
+
+Jinn reads its configuration from `~/.jinn/config.yaml`. An example:
+
+```yaml
+gateway:
+  port: 7777
+
+engines:
+  claude:
+    enabled: true
+  codex:
+    enabled: false
+
+connectors:
+  slack:
+    enabled: true
+    app_token: xapp-...
+    bot_token: xoxb-...
+
+cron:
+  jobs:
+    - name: daily-review
+      schedule: "0 9 * * *"
+      task: "Review open PRs"
+
+org:
+  agents:
+    - name: reviewer
+      role: code-review
+```
+
+## 📁 Project Structure
+
+```
+jinn/
+  packages/
+    jimmy/          # Core gateway daemon + CLI
+    web/            # Web dashboard (frontend)
+  turbo.json        # Turborepo build configuration
+  pnpm-workspace.yaml
+  tsconfig.base.json
+```
+
+## 🧑‍💻 Development
+
+```bash
+git clone https://github.com/hristo2612/jinn.git
+cd jinn
+pnpm install
+pnpm setup   # one-time: builds all packages and creates ~/.jinn
+pnpm dev     # starts gateway + Next.js dev server with hot reload
+```
+
+Open [http://localhost:3000](http://localhost:3000) to use the web dashboard.
+
+### Available Scripts
+
+| Command            | Description                                                         |
+| ------------------ | ------------------------------------------------------------------- |
+| `pnpm setup`       | Build all packages and initialize `~/.jinn` (one-time)              |
+| `pnpm dev`         | Start gateway (`:7777`) + Next.js dev server (`:3000`) with hot reload |
+| `pnpm start`       | Production-style clean build + start gateway on `:7777`             |
+| `pnpm stop`        | Stop the running gateway daemon                                     |
+| `pnpm status`      | Check if the gateway daemon is running                              |
+| `pnpm build`       | Build all packages                                                  |
+| `pnpm typecheck`   | Run TypeScript type checking                                        |
+| `pnpm lint`        | Lint all packages                                                   |
+| `pnpm clean`       | Clean build artifacts                                               |
 
 ---
 
-## What's Different?
+# 🔮 Fork Extensions (Jinn×Hermes)
 
-This fork integrates **Hermes** deeply into Jinn — both as a runtime and as a context-enrichment middleware.
+This section documents features specific to this experimental fork.
 
-### 🔮 Hermes in Jinn: Two Roles
+## Hermes Integration: Two Roles
 
-**1. Hermes as Runtime** — Hermes is a standalone agentique CLI (multi-provider, memory, skills, MCP). Jinn can spawn it like any other engine:
+### 1. Hermes as Runtime
+
+Hermes is a standalone agentique CLI (multi-provider, memory, skills, MCP). Jinn spawns it like any other engine:
 
 ```yaml
 # Employee config
@@ -21,7 +256,9 @@ hermesProvider: anthropic
 hermesProfile: jinn
 ```
 
-**2. Hermes as Context Middleware** — When `hermesHooks.enabled = true` on a NON-hermes runtime, Jinn enriches the prompt with Hermes data before spawning:
+### 2. Hermes as Context Middleware
+
+When `hermesHooks.enabled = true` on a NON-hermes runtime, Jinn enriches the prompt with Hermes data before spawning:
 
 ```yaml
 # Employee config  
@@ -34,148 +271,7 @@ hermesHooks:
 
 Result: Claude Code receives enriched context (memory, skills) but **Claude Code executes**, not Hermes.
 
-### 🧠 Bus-Not-Brain Philosophy
-
-Jinn is a **bus, not a brain**. It orchestrates runtimes without reinventing their logic.
-
-```
-SESSION MANAGER
-     │
-     ├── Resolve runtimeRef (employee config or routing)
-     ├── Apply fallback if runtime unavailable
-     ├── IF hermesHooks.enabled AND runtime != "hermes"
-     │   └── Inject enriched context via HermesContextService
-     └── Spawn executor (hermes, claude, codex, gemini)
-```
-
-### 📊 Hermes Data Connector
-
-Separate from the runtime, the **HermesDataConnector** exposes Hermes data via `/api/hermes/*`:
-
-| Feature | Description |
-|---------|-------------|
-| **H · Sessions** | Browse past sessions with full transcripts |
-| **H · Memory** | View and edit `MEMORY.md` / `USER.md` directly |
-| **H · Honcho** | Deep integration with [Honcho](https://github.com/plastic-labs/honcho) vectorial memory |
-| **H · Skills** | Browse, search, and manage reusable skill library |
-| **H · Wiki** | Multi-wiki browser with tree view, search, and in-browser editing |
-
-This is a **read-only data connector** — it doesn't intercept Jinn sessions.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 20+
-- pnpm 9+
-- [Hermes](https://github.com/anthropics/hermes) installed (`~/.hermes/`)
-- PostgreSQL (for Honcho, optional)
-
-### Installation
-
-```bash
-# Clone the fork
-git clone https://github.com/YOUR_USERNAME/jinn-hermes.git
-cd jinn-hermes
-
-# Install dependencies
-pnpm install
-
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your settings
-# - ANTHROPIC_API_KEY (or use Hermes auth)
-# - JINN_PORT (default: 7777)
-# - HONCHO_URL (optional)
-
-# Build
-pnpm build
-
-# Start
-pnpm start
-```
-
-### First Run Setup
-
-1. Open `http://localhost:7777` in your browser
-2. The **Onboarding Wizard** will guide you through:
-   - Engine selection (Hermes, Claude, Codex, Gemini)
-   - Connector setup (Slack, Discord, Telegram)
-   - Hermes profile configuration
-   - Honcho connection (optional)
-
----
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JINN_PORT` | `7777` | Gateway HTTP/WebSocket port |
-| `JINN_DATA_DIR` | `~/.jinn` | Data directory for sessions, logs |
-| `HERMES_HOME` | `~/.hermes` | Hermes installation directory |
-| `HERMES_WEBAPI_URL` | `http://127.0.0.1:8642` | Hermes WebAPI endpoint |
-| `HONCHO_URL` | `http://127.0.0.1:8000` | Honcho server URL (optional) |
-| `HONCHO_PEER_NAME` | `default` | Honcho peer/user identifier |
-
-### Hermes Profile
-
-Create a profile in `~/.hermes/profiles/jinn/config.yaml`:
-
-```yaml
-model: claude-sonnet-4-20250514
-provider: anthropic
-personality: assistant
-tools:
-  mcp:
-    servers:
-      jinn:
-        command: npx
-        args: ["-y", "@jinn/mcp-server"]
-```
-
-### Wiki Paths
-
-Wikis are auto-discovered from:
-- `~/wiki` (default)
-- `~/wiki-*` (pattern match)
-- Custom paths in `~/.hermes/config.yaml`:
-
-```yaml
-skills:
-  config:
-    wiki:
-      path: ~/my-knowledge-base
-```
-
----
-
-## Features
-
-### Core Jinn Features
-
-- 🔌 **Multi-engine support** — Claude Code, Codex, Gemini CLI
-- 📡 **Connectors** — Slack, Discord, Telegram, WhatsApp
-- ⏰ **Cron scheduling** — Background tasks with hot-reload
-- 🏢 **Organization system** — Departments, roles, task boards
-- 🔄 **Workflows** — Visual workflow editor with conditions and loops
-
-### Hermes Extensions (this fork)
-
-- 📜 **Session Browser** — Full transcript history with search
-- 🧠 **Memory Editor** — Edit MEMORY.md and USER.md in-browser
-- 🗃️ **Honcho Integration** — Vectorial memory, peer profiles, dialectic queries
-- 📚 **Skills Browser** — Browse, search, filter by category
-- 📖 **Wiki Browser** — Multi-wiki support, tree/list view, edit mode
-- 🎯 **Activity Panel** — Live tool calls, thinking, events stream
-
----
-
-## Architecture
+## Fork Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -211,86 +307,97 @@ skills:
 │  │              HERMES DATA CONNECTOR (read-only)             │ │
 │  │  /api/hermes/* → Sessions · Memory · Skills · Wiki         │ │
 │  └───────────────────────────────────────────────────────────┘ │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │           ORG SYSTEM · CONNECTORS · CRON                   │ │
-│  │  Departments · Task Boards · Slack · Discord · Telegram    │ │
-│  └───────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                         HTTP/WS API
-                               │
-┌─────────────────────────────────────────────────────────────────┐
-│                      WEB DASHBOARD                              │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐             │
-│  │  Chat   │ │   Org   │ │  Cron   │ │ Workflows │             │
-│  └─────────┘ └─────────┘ └─────────┘ └───────────┘             │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐             │
-│  │H·Session│ │H·Memory │ │H·Honcho │ │  H·Wiki   │  ← Hermes   │
-│  └─────────┘ └─────────┘ └─────────┘ └───────────┘    data     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
----
+## Hermes Data Connector
 
-## Development
+The **HermesDataConnector** exposes Hermes data via `/api/hermes/*`:
+
+| Feature | Description |
+|---------|-------------|
+| **H · Sessions** | Browse past sessions with full transcripts |
+| **H · Memory** | View and edit `MEMORY.md` / `USER.md` directly |
+| **H · Honcho** | Deep integration with [Honcho](https://github.com/plastic-labs/honcho) vectorial memory |
+| **H · Skills** | Browse, search, and manage reusable skill library |
+| **H · Wiki** | Multi-wiki browser with tree view, search, and in-browser editing |
+
+This is a **read-only data connector** — it doesn't intercept Jinn sessions.
+
+## Fork-Specific Setup
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+- [Hermes](https://github.com/anthropics/hermes) installed (`~/.hermes/`)
+- PostgreSQL (for Honcho, optional)
+
+### Installation
 
 ```bash
-# Dev mode with hot reload
-pnpm dev
+# Clone the fork
+git clone https://github.com/YOUR_USERNAME/jinn-hermes.git
+cd jinn-hermes
 
-# Run tests
-pnpm test
+# Install dependencies
+pnpm install
 
-# Type check
-pnpm typecheck
+# Copy environment template
+cp .env.example .env
 
-# Lint
-pnpm lint
+# Build & start
+pnpm build
+pnpm start
 ```
 
-### Project Structure
+### Environment Variables (Fork)
 
-```
-packages/
-├── jimmy/          # Gateway daemon (Node.js)
-│   ├── connectors/ # Slack, Discord, Telegram, Hermes, Honcho
-│   ├── engines/    # Claude, Codex, Gemini, Hermes runtime
-│   ├── gateway/    # HTTP API routes
-│   └── workflows/  # Workflow engine
-├── web/            # Dashboard (Next.js)
-│   └── app/
-│       ├── chat/
-│       ├── hermes/ # H · Sessions, Memory, Honcho, Skills, Wiki
-│       └── ...
-└── mcp-server/     # MCP server for tool integration
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JINN_PORT` | `7777` | Gateway HTTP/WebSocket port |
+| `HERMES_HOME` | `~/.hermes` | Hermes installation directory |
+| `HERMES_WEBAPI_URL` | `http://127.0.0.1:8642` | Hermes WebAPI endpoint |
+| `HONCHO_URL` | `http://127.0.0.1:8000` | Honcho server URL (optional) |
+| `HONCHO_PEER_NAME` | `default` | Honcho peer/user identifier |
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
-- [ ] Onboarding wizard for first-time setup
-- [ ] Wiki edit history / git integration
-- [ ] Honcho collection browser
-- [ ] Skills creation wizard
+### Core Jinn
+- [x] Discord bot integration
+- [x] WhatsApp connector
+- [x] Telegram connector
+- [x] Gemini CLI engine
+- [x] Engine fallback chains
+- [ ] iMessage connector (macOS)
+- [ ] Local models (Ollama)
+- [ ] Plugin system
+- [ ] Docker image
+
+### Fork Extensions
+- [x] Hermes as runtime
+- [x] Hermes context middleware
+- [x] Hermes data connector (sessions, memory, skills)
+- [x] Wiki browser (multi-wiki)
+- [x] Honcho integration
+- [ ] Onboarding wizard
+- [ ] Wiki edit history
 - [ ] Cross-wiki search
-- [ ] Mobile-friendly responsive UI
 
 ---
 
-## Credits
+## 📄 License
 
-- [Jinn](https://github.com/jinn-ai/jinn) — Original project by the Jinn team
+[MIT](LICENSE)
+
+## 🙏 Acknowledgments
+
+- [Jinn](https://github.com/hristo2612/jinn) — Original project by Hristo Gueorguiev
+- [ClawPort UI](https://github.com/JohnRiceML/clawport-ui) — Dashboard components by John Rice
 - [Hermes](https://github.com/anthropics/hermes) — Claude Code CLI wrapper
 - [Honcho](https://github.com/plastic-labs/honcho) — Vectorial memory server
-- [Andrej Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — Wiki pattern inspiration
-
----
-
-## License
-
-MIT — Same as upstream Jinn.
 
 ---
 
