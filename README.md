@@ -84,31 +84,56 @@ Then open [http://localhost:7777](http://localhost:7777).
 ## 🏗️ Architecture
 
 ```
-                          +----------------+
-                          |   jinn CLI     |
-                          +-------+--------+
-                                  |
-                          +-------v--------+
-                          |    Gateway     |
-                          |    Daemon      |
-                          +--+--+--+--+---+
-                             |  |  |  |
-              +--------------+  |  |  +--------------+
-              |                 |  |                  |
-      +-------v-------+ +------v------+  +-----------v---+
-      |    Engines     | | Connectors  |  |    Web UI     |
-      |Claude|Codex|Gem| | Slack|WA|DC |  | localhost:7777|
-      +----------------+ +-------------+  +---------------+
-              |                 |
-      +-------v-------+ +------v------+
-      |     Cron      | |    Org      |
-      |   Scheduler   | |   System    |
-      +---------------+ +-------------+
+                              +----------------+
+                              |   jinn CLI     |
+                              +-------+--------+
+                                      |
+                              +-------v--------+
+                              |    Gateway     |
+                              |    Daemon      |
+                              +--+--+--+--+---+
+                                 |  |  |  |
+             +-------------------+  |  |  +-------------------+
+             |                      |  |                      |
+    +--------v--------+    +-------v-------+    +------------v----+
+    |  Session Mgr    |    |  Connectors   |    |     Web UI      |
+    |  + Fallback     |    | Slack|WA|DC   |    | localhost:7777  |
+    +--------+--------+    +---------------+    +-----------------+
+             |
+    +--------v-------------------------------------------+
+    |                    ENGINES                         |
+    |  +----------+  +----------+  +--------+  +------+  |
+    |  | Hermes   |  | Claude   |  | Codex  |  |Gemini|  |
+    |  | (native  |  | Code     |  | SDK    |  | CLI  |  |
+    |  | memory,  |  +----------+  +--------+  +------+  |
+    |  | skills,  |       ▲                              |
+    |  | MCP)     |       │ hermesHooks?                 |
+    |  +----------+       │                              |
+    |       │      +------+-------+                      |
+    |       │      | HermesContext|  (enrich prompts     |
+    |       │      | Service      |   for non-hermes)    |
+    |       │      +--------------+                      |
+    +----------------------------------------------------+
+             |                      |
+    +--------v--------+    +-------v-------+
+    |     Cron        |    |    Org        |
+    |   Scheduler     |    |   System      |
+    +-----------------+    +---------------+
+             |
+    +--------v-------------------------------------------+
+    |              HERMES DATA CONNECTOR                 |
+    |  /api/hermes/* → Sessions | Memory | Skills | Wiki |
+    +----------------------------------------------------+
 ```
 
 The CLI sends commands to the gateway daemon. The daemon dispatches work to AI
-engines (Claude Code, Codex, Gemini CLI), manages connector integrations, runs
-scheduled cron jobs, and serves the web dashboard.
+engines via the Session Manager, which handles routing and fallbacks.
+
+**Hermes** is both an engine (with native memory, skills, MCP) and a context
+enrichment service (injecting memory/skills into other engines via hermesHooks).
+
+The **Hermes Data Connector** exposes read-only access to Hermes data for the
+web dashboard (sessions, memory, skills, wiki).
 
 ## 🧠 Hermes-first engine
 
@@ -271,45 +296,6 @@ hermesHooks:
 
 Result: Claude Code receives enriched context (memory, skills) but **Claude Code executes**, not Hermes.
 
-## Fork Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         JINN GATEWAY                            │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │                    SESSION MANAGER                         │ │
-│  │  • Resolve runtimeRef from employee/routing config         │ │
-│  │  • Apply fallback chain if runtime unavailable             │ │
-│  │  • Enrich context via HermesContextService (if hooks on)   │ │
-│  └───────────────────────────────────────────────────────────┘ │
-│                              │                                  │
-│         ┌────────────────────┼────────────────────┐            │
-│         ▼                    ▼                    ▼            │
-│  ┌─────────────┐  ┌──────────────────┐  ┌─────────────┐       │
-│  │   HERMES    │  │  HERMES CONTEXT  │  │  EXECUTORS  │       │
-│  │  EXECUTOR   │  │     SERVICE      │  │             │       │
-│  │             │  │   (middleware)   │  │ ┌─────────┐ │       │
-│  │ spawn:      │  │                  │  │ │ claude  │ │       │
-│  │ hermes chat │  │ IF runtime !=    │  │ ├─────────┤ │       │
-│  │             │  │ hermes AND       │  │ │ codex   │ │       │
-│  │ Native:     │  │ hooks.enabled:   │  │ ├─────────┤ │       │
-│  │ • memory    │  │                  │  │ │ gemini  │ │       │
-│  │ • skills    │  │ → Honcho memory  │  │ └─────────┘ │       │
-│  │ • MCP       │  │ → Skills summary │  │             │       │
-│  │ • Honcho    │  │ → MCP tools      │  │ Receive     │       │
-│  └─────────────┘  │                  │  │ enriched    │       │
-│                   │ Prepend to       │  │ context     │       │
-│                   │ system prompt    │  │             │       │
-│                   └──────────────────┘  └─────────────┘       │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │              HERMES DATA CONNECTOR (read-only)             │ │
-│  │  /api/hermes/* → Sessions · Memory · Skills · Wiki         │ │
-│  └───────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
 ## Hermes Data Connector
 
 The **HermesDataConnector** exposes Hermes data via `/api/hermes/*`:
@@ -328,37 +314,60 @@ This is a **read-only data connector** — it doesn't intercept Jinn sessions.
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 9+
-- [Hermes](https://github.com/anthropics/hermes) installed (`~/.hermes/`)
-- PostgreSQL (for Honcho, optional)
+- Node.js 20+ and pnpm 9+
+- [Hermes CLI](https://github.com/anthropics/hermes) installed and configured (`~/.hermes/`)
+- (Optional) [Honcho](https://github.com/plastic-labs/honcho) for vectorial memory
 
 ### Installation
 
 ```bash
-# Clone the fork
-git clone https://github.com/YOUR_USERNAME/jinn-hermes.git
-cd jinn-hermes
+# Clone this fork
+git clone https://github.com/firefloc-nox/jinn.git
+cd jinn
+git checkout lain
 
 # Install dependencies
 pnpm install
 
-# Copy environment template
-cp .env.example .env
-
-# Build & start
+# Build all packages
 pnpm build
-pnpm start
+
+# Initialize Jinn config (creates ~/.jinn/)
+pnpm setup
+
+# Start in dev mode (gateway :7777 + Next.js :3000)
+pnpm dev
 ```
 
-### Environment Variables (Fork)
+Open [http://localhost:3000](http://localhost:3000) for the web dashboard.
+
+### Configuration
+
+Edit `~/.jinn/config.yaml` to configure Hermes integration:
+
+```yaml
+engines:
+  default: hermes
+  hermes:
+    bin: hermes
+    # Optional: specify provider/profile
+    provider: anthropic
+    profile: jinn
+
+# Optional: Honcho vectorial memory
+honcho:
+  enabled: true
+  url: http://127.0.0.1:8000
+  peerName: firefloc
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JINN_PORT` | `7777` | Gateway HTTP/WebSocket port |
+| `GATEWAY_PORT` | `7777` | Gateway HTTP/WebSocket port |
 | `HERMES_HOME` | `~/.hermes` | Hermes installation directory |
-| `HERMES_WEBAPI_URL` | `http://127.0.0.1:8642` | Hermes WebAPI endpoint |
-| `HONCHO_URL` | `http://127.0.0.1:8000` | Honcho server URL (optional) |
+| `HONCHO_URL` | — | Honcho server URL (enables integration) |
 | `HONCHO_PEER_NAME` | `default` | Honcho peer/user identifier |
 
 ---
