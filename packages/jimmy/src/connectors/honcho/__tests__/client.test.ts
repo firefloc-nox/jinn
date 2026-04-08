@@ -181,7 +181,7 @@ describe("HonchoClient", () => {
     it("deletes conclusion by ID", async () => {
       let capturedMethod = "";
       let capturedPath = "";
-      mockHttpResponse(204, undefined, (options) => {
+      mockHttpResponse(204, {}, (options) => {
         capturedMethod = options.method ?? "";
         capturedPath = options.path ?? "";
       });
