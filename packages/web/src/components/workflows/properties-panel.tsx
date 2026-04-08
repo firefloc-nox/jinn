@@ -911,6 +911,97 @@ function LogForm({
   )
 }
 
+// ─── Retry Config Form ────────────────────────────────────────────────────────
+
+function RetryForm({
+  config, onChange, lang,
+}: { config: Record<string, unknown>; onChange: (k: string, v: unknown) => void; lang: Lang }) {
+  const maxRetries = Number(config.maxRetries ?? 0)
+  const retryDelayMs = Number(config.retryDelayMs ?? 1000)
+
+  const RETRY_PRESETS = [
+    { label: lang === 'fr' ? 'Aucun' : 'None', value: 0 },
+    { label: '1', value: 1 },
+    { label: '2', value: 2 },
+    { label: '3', value: 3 },
+    { label: '5', value: 5 },
+  ]
+
+  const DELAY_PRESETS = [
+    { label: '1s', ms: 1000 },
+    { label: '2s', ms: 2000 },
+    { label: '5s', ms: 5000 },
+    { label: '10s', ms: 10000 },
+    { label: '30s', ms: 30000 },
+  ]
+
+  return (
+    <>
+      <div
+        style={{
+          marginTop: 8, paddingTop: 12, borderTop: '1px solid var(--separator)',
+        }}
+      >
+        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {lang === 'fr' ? 'Configuration des retentatives' : 'Retry Configuration'}
+        </span>
+      </div>
+      <Field
+        label={lang === 'fr' ? 'Tentatives max' : 'Max Retries'}
+        help={lang === 'fr' ? 'Nombre de retentatives en cas d\'échec (0 = pas de retry)' : 'Number of retry attempts on failure (0 = no retry)'}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+          {RETRY_PRESETS.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => onChange('maxRetries', p.value)}
+              style={presetBtnStyle(maxRetries === p.value)}
+            >{p.label}</button>
+          ))}
+        </div>
+        <input
+          type="number"
+          min={0}
+          max={10}
+          value={maxRetries}
+          onChange={(e) => onChange('maxRetries', Math.max(0, Math.min(10, Number(e.target.value))))}
+          style={inputStyle}
+        />
+      </Field>
+      {maxRetries > 0 && (
+        <Field
+          label={lang === 'fr' ? 'Délai entre retentatives' : 'Retry Delay'}
+          help={lang === 'fr' ? 'Délai avant chaque retentative (augmente à chaque tentative)' : 'Delay before each retry attempt (increases with each attempt)'}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+            {DELAY_PRESETS.map((p) => (
+              <button
+                key={p.ms}
+                type="button"
+                onClick={() => onChange('retryDelayMs', p.ms)}
+                style={presetBtnStyle(retryDelayMs === p.ms)}
+              >{p.label}</button>
+            ))}
+          </div>
+          <input
+            type="number"
+            min={100}
+            step={100}
+            value={retryDelayMs}
+            onChange={(e) => onChange('retryDelayMs', Math.max(100, Number(e.target.value)))}
+            style={inputStyle}
+            placeholder="ms"
+          />
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+            {lang === 'fr' ? `Délai: ${retryDelayMs}ms × numéro de tentative` : `Delay: ${retryDelayMs}ms × attempt number`}
+          </span>
+        </Field>
+      )}
+    </>
+  )
+}
+
 // ─── Properties Panel ────────────────────────────────────────────────────────
 
 export function PropertiesPanel() {
@@ -995,6 +1086,11 @@ export function PropertiesPanel() {
                   placeholder="Optional message"
                 />
               </Field>
+            )}
+
+            {/* Retry configuration - available for nodes that can fail and be retried */}
+            {nodeType && !['TRIGGER', 'DONE', 'ERROR', 'CONDITION'].includes(nodeType) && (
+              <RetryForm config={config} onChange={handleChange} lang={lang} />
             )}
           </>
         )}

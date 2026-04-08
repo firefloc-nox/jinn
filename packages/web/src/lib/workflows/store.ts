@@ -18,7 +18,13 @@ function defNodeToRF(n: WorkflowNode): Node {
     id: n.id,
     type: n.type.toLowerCase(),  // react flow node type key (matches registered nodeTypes)
     position: n.position ?? { x: 0, y: 0 },
-    data: { ...n.config, nodeType },  // nodeType in UPPERCASE for display/logic
+    data: {
+      ...n.config,
+      nodeType,
+      // Include retry config in data for UI access
+      maxRetries: n.retry?.maxRetries ?? 0,
+      retryDelayMs: n.retry?.retryDelayMs ?? 1000,
+    },
   }
 }
 
@@ -33,13 +39,25 @@ function defEdgeToRF(e: WorkflowEdge): Edge {
 }
 
 function rfNodeToDef(n: Node): WorkflowNode {
-  const { nodeType, ...config } = n.data as Record<string, unknown> & { nodeType: string }
-  return {
+  const { nodeType, maxRetries, retryDelayMs, ...config } = n.data as Record<string, unknown> & {
+    nodeType: string
+    maxRetries?: number
+    retryDelayMs?: number
+  }
+  const result: WorkflowNode = {
     id: n.id,
     type: nodeType as WorkflowNode['type'],
     position: n.position,
     config,
   }
+  // Only include retry config if maxRetries > 0
+  if (typeof maxRetries === 'number' && maxRetries > 0) {
+    result.retry = {
+      maxRetries,
+      retryDelayMs: typeof retryDelayMs === 'number' ? retryDelayMs : 1000,
+    }
+  }
+  return result
 }
 
 function rfEdgeToDef(e: Edge): WorkflowEdge {

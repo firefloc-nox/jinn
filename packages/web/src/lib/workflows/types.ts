@@ -3,11 +3,17 @@ export type TriggerType = 'manual' | 'cron' | 'webhook' | 'kanban_card_added' | 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'success' | 'error' | 'cancelled'
 export type StepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'waiting'
 
+export interface RetryConfig {
+  maxRetries?: number
+  retryDelayMs?: number
+}
+
 export interface WorkflowNode {
   id: string
   type: NodeType
   position?: { x: number; y: number }
   config: Record<string, unknown>
+  retry?: RetryConfig
 }
 
 export interface WorkflowEdge {

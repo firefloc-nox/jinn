@@ -277,8 +277,11 @@ export class WorkflowRunner extends EventEmitter {
 
         updateRun(runId, { current_node_id: currentNodeId, context });
 
-        const maxAttempts = node.max_attempts ?? 3;
-        const retryDelayMs = node.retry_delay_ms ?? 1000;
+        // Retry configuration: new retry config takes precedence over legacy fields
+        // Default: 0 retries (no retry) unless explicitly configured
+        const maxRetries = node.retry?.maxRetries ?? node.max_attempts ?? 0;
+        const retryDelayMs = node.retry?.retryDelayMs ?? node.retry_delay_ms ?? 1000;
+        const maxAttempts = maxRetries + 1; // Total attempts = retries + 1 initial attempt
         let lastError: Error | undefined;
         let stepId: string | undefined;
 
@@ -336,7 +339,9 @@ export class WorkflowRunner extends EventEmitter {
             break;
           } catch (err) {
             lastError = err instanceof Error ? err : new Error(String(err));
-            logger.warn(`[workflow:runner] Step ${node.id} failed (attempt ${attempt + 1}/${maxAttempts}): ${lastError.message}`);
+            const isRetrying = attempt + 1 < maxAttempts;
+            const retryInfo = isRetrying ? `, retrying in ${retryDelayMs}ms...` : ' (no more retries)';
+            logger.warn(`[workflow:runner] Step ${node.id} failed (attempt ${attempt + 1}/${maxAttempts})${retryInfo}: ${lastError.message}`);
 
             updateStep(stepId, {
               status: attempt + 1 >= maxAttempts ? 'failed' : 'failed',
@@ -454,39 +459,72 @@ export class WorkflowRunner extends EventEmitter {
 
         updateRun(runId, { current_node_id: currentNodeId, context });
 
-        const stepId = randomUUID();
-        insertStep({
-          id: stepId, run_id: runId, node_id: node.id, node_type: node.type,
-          status: 'running', input: context, output: null, error: null,
-          retry_count: 0, started_at: new Date().toISOString(), completed_at: null,
-        });
+        // Retry configuration for _continueRun
+        const maxRetries = node.retry?.maxRetries ?? node.max_attempts ?? 0;
+        const retryDelayMs = node.retry?.retryDelayMs ?? node.retry_delay_ms ?? 1000;
+        const maxAttempts = maxRetries + 1;
+        let lastError: Error | undefined;
+        let stepId: string | undefined;
 
-        const result = await nodeRegistry.execute(node, context, services);
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          stepId = randomUUID();
+          insertStep({
+            id: stepId, run_id: runId, node_id: node.id, node_type: node.type,
+            status: 'running', input: context, output: null, error: null,
+            retry_count: attempt, started_at: new Date().toISOString(), completed_at: null,
+          });
 
-        if (result.suspend) {
-          updateStep(stepId, { status: 'completed', output: result.output, completed_at: new Date().toISOString() });
-          updateRun(runId, { status: 'waiting', context, current_node_id: currentNodeId });
-          this.emit('run.suspended', { runId, suspend: result.suspend });
-          return;
+          try {
+            const result = await nodeRegistry.execute(node, context, services);
+
+            if (result.suspend) {
+              updateStep(stepId, { status: 'completed', output: result.output, completed_at: new Date().toISOString() });
+              updateRun(runId, { status: 'waiting', context, current_node_id: currentNodeId });
+              this.emit('run.suspended', { runId, suspend: result.suspend });
+              return;
+            }
+
+            // Apply context updates from node result
+            if (result.context_updates) {
+              Object.assign(context, result.context_updates);
+              updateRun(runId, { context });
+            }
+
+            updateStep(stepId, { status: 'completed', output: result.output, completed_at: new Date().toISOString() });
+
+            let nextId: string | null = null;
+            if (result.next) {
+              nextId = Array.isArray(result.next) ? result.next[0] : result.next;
+            } else if (currentNodeId) {
+              const edges = edgeMap.get(currentNodeId);
+              nextId = edges?.[0] ?? null;
+            }
+
+            currentNodeId = nextId;
+            lastError = undefined;
+            break;
+          } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            const isRetrying = attempt + 1 < maxAttempts;
+            const retryInfo = isRetrying ? `, retrying in ${retryDelayMs}ms...` : ' (no more retries)';
+            logger.warn(`[workflow:runner] Step ${node.id} failed (attempt ${attempt + 1}/${maxAttempts})${retryInfo}: ${lastError.message}`);
+
+            updateStep(stepId, {
+              status: 'failed',
+              error: lastError.message,
+              completed_at: new Date().toISOString(),
+              retry_count: attempt,
+            });
+
+            if (attempt + 1 < maxAttempts) {
+              await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+            }
+          }
         }
 
-        // Apply context updates from node result
-        if (result.context_updates) {
-          Object.assign(context, result.context_updates);
-          updateRun(runId, { context });
+        if (lastError) {
+          throw lastError;
         }
-
-        updateStep(stepId, { status: 'completed', output: result.output, completed_at: new Date().toISOString() });
-
-        let nextId: string | null = null;
-        if (result.next) {
-          nextId = Array.isArray(result.next) ? result.next[0] : result.next;
-        } else {
-          const edges = edgeMap.get(currentNodeId);
-          nextId = edges?.[0] ?? null;
-        }
-
-        currentNodeId = nextId;
       }
 
       updateRun(runId, { status: 'completed', completed_at: new Date().toISOString(), context });
