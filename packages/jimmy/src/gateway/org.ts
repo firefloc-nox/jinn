@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { ORG_DIR } from "../shared/paths.js";
-import type { Employee, HermesHooks, ProfileRef, RuntimeRef } from "../shared/types.js";
+import type { BudgetConfig, Employee, HermesHooks, ProfileRef, RuntimeRef } from "../shared/types.js";
 import { logger } from "../shared/logger.js";
 
 function parseProfileRef(value: unknown): ProfileRef | undefined {
@@ -22,6 +22,17 @@ function parseHermesHooks(value: unknown): HermesHooks | undefined {
     memory: typeof hooks.memory === "boolean" ? hooks.memory : undefined,
     skills: typeof hooks.skills === "boolean" ? hooks.skills : undefined,
     mcp: typeof hooks.mcp === "boolean" ? hooks.mcp : undefined,
+  };
+}
+
+function parseBudgetConfig(value: unknown): BudgetConfig | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const config = value as Record<string, unknown>;
+  if (typeof config.threshold !== "number" || config.threshold <= 0) return undefined;
+  return {
+    threshold: config.threshold,
+    alertConnector: typeof config.alertConnector === "string" ? config.alertConnector : undefined,
+    alertChannel: typeof config.alertChannel === "string" ? config.alertChannel : undefined,
   };
 }
 
@@ -100,6 +111,7 @@ export function scanOrg(): Map<string, Employee> {
                   : typeof data.fallbackEngine === "string"
                     ? [data.fallbackEngine as RuntimeRef]
                     : undefined,
+              budgetConfig: parseBudgetConfig(data.budgetConfig),
             };
             registry.set(employee.name, employee);
           }
@@ -174,6 +186,8 @@ export interface UpdateEmployeeFields {
   hermesSkills?: string | null;
   /** @deprecated Use hermesHooks.memory instead. Synced bidirectionally. */
   honcho?: boolean | null;
+  /** Budget configuration for alerts */
+  budgetConfig?: BudgetConfig | null;
 }
 
 /**
@@ -343,6 +357,13 @@ export function updateEmployeeYaml(
         data.hermesSkills = updates.hermesSkills;
       }
     }
+    if (updates.budgetConfig !== undefined) {
+      if (updates.budgetConfig === null) {
+        delete data.budgetConfig;
+      } else {
+        data.budgetConfig = updates.budgetConfig;
+      }
+    }
 
     fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
     return true;
@@ -379,6 +400,7 @@ export interface CreateEmployeeInput {
   hermesSkills?: string;
   /** @deprecated Use hermesHooks.memory instead. Synced bidirectionally. */
   honcho?: boolean;
+  budgetConfig?: BudgetConfig;
 }
 
 /**
@@ -429,6 +451,7 @@ export function createEmployeeYaml(input: CreateEmployeeInput): string {
   if (input.hermesProvider) data.hermesProvider = input.hermesProvider;
   if (input.hermesToolsets) data.hermesToolsets = input.hermesToolsets;
   if (input.hermesSkills) data.hermesSkills = input.hermesSkills;
+  if (input.budgetConfig) data.budgetConfig = input.budgetConfig;
 
   fs.writeFileSync(filePath, yaml.dump(data, { lineWidth: -1 }), "utf-8");
   logger.info(`Created employee YAML: ${filePath}`);

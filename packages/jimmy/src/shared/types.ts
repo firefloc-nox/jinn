@@ -366,6 +366,8 @@ export interface Employee {
   hermesSkills?: string;
   /** @deprecated Legacy fallback runtime chain. Prefer org-level routing.fallbackRuntimes. */
   fallbackRuntimes?: RuntimeRef[];
+  /** Budget configuration for the employee */
+  budgetConfig?: BudgetConfig;
 }
 
 /** A service that an employee can provide to other employees/departments. */
@@ -412,6 +414,21 @@ export interface Department {
   name: string;
   displayName: string;
   description: string;
+  /** Budget configuration for the department */
+  budgetConfig?: BudgetConfig;
+}
+
+/**
+ * Budget configuration for employees or departments.
+ * When threshold is exceeded, a budget:exceeded event is emitted.
+ */
+export interface BudgetConfig {
+  /** Monthly budget threshold in USD */
+  threshold: number;
+  /** Connector to use for alert notifications (e.g., "discord", "slack") */
+  alertConnector?: string;
+  /** Channel ID for alert notifications */
+  alertChannel?: string;
 }
 
 /** Stdio-based MCP server (spawned as child process) */

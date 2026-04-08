@@ -1512,6 +1512,66 @@ export async function handleApiRequest(
       return json(res, created ?? { name: safeName }, 201);
     }
 
+    // GET /api/org/employees/:name/budget — get budget status for an employee
+    params = matchRoute("/api/org/employees/:name/budget", pathname);
+    if (method === "GET" && params) {
+      const { scanOrg } = await import("./org.js");
+      const { getBudgetStatusFromConfig } = await import("./budgets.js");
+      const orgRegistry = scanOrg();
+      const emp = orgRegistry.get(params.name);
+      if (!emp) return notFound(res);
+
+      if (!emp.budgetConfig) {
+        return json(res, {
+          employee: params.name,
+          configured: false,
+          status: "ok",
+          spend: 0,
+          threshold: 0,
+          percent: 0,
+        });
+      }
+
+      const status = getBudgetStatusFromConfig(params.name, emp.budgetConfig);
+      return json(res, {
+        employee: params.name,
+        configured: true,
+        ...status,
+      });
+    }
+
+    // PUT /api/org/employees/:name/budget — set budget config for an employee
+    params = matchRoute("/api/org/employees/:name/budget", pathname);
+    if (method === "PUT" && params) {
+      const parsed = await readJsonBody(req, res);
+      if (!parsed.ok) return;
+      const body = parsed.body as any;
+
+      const { scanOrg, updateEmployeeYaml } = await import("./org.js");
+      const orgRegistry = scanOrg();
+      const emp = orgRegistry.get(params.name);
+      if (!emp) return notFound(res);
+
+      // Validate budget config
+      if (body.threshold !== undefined && (typeof body.threshold !== "number" || body.threshold < 0)) {
+        return badRequest(res, "threshold must be a non-negative number");
+      }
+
+      const budgetConfig = body.threshold === null || body.threshold === 0
+        ? null
+        : {
+            threshold: body.threshold,
+            alertConnector: typeof body.alertConnector === "string" ? body.alertConnector : undefined,
+            alertChannel: typeof body.alertChannel === "string" ? body.alertChannel : undefined,
+          };
+
+      const updated = updateEmployeeYaml(params.name, { budgetConfig });
+      if (!updated) return serverError(res, "Failed to update employee budget config");
+
+      context.emit("org:updated", { employee: params.name });
+      return json(res, { status: "ok", budgetConfig });
+    }
+
     // GET /api/org/services — list all cross-department services
     if (method === "GET" && pathname === "/api/org/services") {
       const { scanOrg } = await import("./org.js");

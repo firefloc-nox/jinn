@@ -130,3 +130,60 @@ async function _sendRaw(parentSessionId: string, message: string): Promise<void>
     body: JSON.stringify({ message, role: "notification" }),
   });
 }
+
+/**
+ * Send a budget alert notification to the configured connector/channel.
+ * Fire-and-forget — errors are logged but never rethrown.
+ */
+export function notifyBudgetAlert(
+  employee: string,
+  spend: number,
+  threshold: number,
+  percent: number,
+  alertConnector?: string,
+  alertChannel?: string,
+  type: "exceeded" | "warning" = "exceeded",
+): void {
+  _sendBudgetNotification(employee, spend, threshold, percent, alertConnector, alertChannel, type).catch((err) => {
+    logger.warn(`[callbacks] Failed to send budget alert: ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
+async function _sendBudgetNotification(
+  employee: string,
+  spend: number,
+  threshold: number,
+  percent: number,
+  alertConnector?: string,
+  alertChannel?: string,
+  type: "exceeded" | "warning" = "exceeded",
+): Promise<void> {
+  let port = 7777;
+  let connector = alertConnector;
+  let channel = alertChannel;
+
+  try {
+    const config = loadConfig();
+    port = config.gateway?.port || 7777;
+    // Fall back to notifications config if not specified in budget config
+    if (!connector) connector = config.notifications?.connector || "discord";
+    if (!channel) channel = config.notifications?.channel;
+  } catch {
+    // Use defaults if config is unavailable
+  }
+
+  if (!channel) {
+    logger.debug(`[callbacks] No alert channel configured for budget notification — skipping`);
+    return;
+  }
+
+  const emoji = type === "exceeded" ? "🚨" : "⚠️";
+  const title = type === "exceeded" ? "Budget Exceeded" : "Budget Warning";
+  const message = `${emoji} **${title}**: Employee "${employee}" has spent $${spend.toFixed(2)} / $${threshold.toFixed(2)} (${percent}%)`;
+
+  await fetch(`http://127.0.0.1:${port}/api/connectors/${connector}/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channel, text: message }),
+  });
+}

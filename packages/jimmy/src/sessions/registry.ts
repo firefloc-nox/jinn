@@ -469,12 +469,14 @@ export function getInterruptedSessions(): Session[] {
 
 /**
  * Accumulate cost and turns for a session (called after each engine run).
+ * Returns the updated session for budget checking.
  */
-export function accumulateSessionCost(id: string, cost: number, turns: number): void {
+export function accumulateSessionCost(id: string, cost: number, turns: number): Session | undefined {
   const db = initDb();
   db.prepare(
     'UPDATE sessions SET total_cost = total_cost + ?, total_turns = total_turns + ? WHERE id = ?',
   ).run(cost, turns, id);
+  return getSession(id);
 }
 
 /**
