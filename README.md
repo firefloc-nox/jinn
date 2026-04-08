@@ -8,11 +8,49 @@
 
 ## What's Different?
 
-This fork extends Jinn with a **Hermes feature layer** — additional capabilities that enhance any engine, not a replacement for them.
+This fork integrates **Hermes** deeply into Jinn — both as a runtime and as a context-enrichment middleware.
 
-### 🔮 Hermes Feature Layer
+### 🔮 Hermes in Jinn: Two Roles
 
-Hermes is **not a Claude Code wrapper**. It's an **extension layer for Jinn** that adds:
+**1. Hermes as Runtime** — Hermes is a standalone agentique CLI (multi-provider, memory, skills, MCP). Jinn can spawn it like any other engine:
+
+```yaml
+# Employee config
+runtime: hermes
+hermesProvider: anthropic
+hermesProfile: jinn
+```
+
+**2. Hermes as Context Middleware** — When `hermesHooks.enabled = true` on a NON-hermes runtime, Jinn enriches the prompt with Hermes data before spawning:
+
+```yaml
+# Employee config  
+runtime: claude          # ← Claude Code executes
+hermesHooks:
+  enabled: true
+  memory: true           # ← Inject Honcho memory
+  skills: true           # ← Inject skills summary
+```
+
+Result: Claude Code receives enriched context (memory, skills) but **Claude Code executes**, not Hermes.
+
+### 🧠 Bus-Not-Brain Philosophy
+
+Jinn is a **bus, not a brain**. It orchestrates runtimes without reinventing their logic.
+
+```
+SESSION MANAGER
+     │
+     ├── Resolve runtimeRef (employee config or routing)
+     ├── Apply fallback if runtime unavailable
+     ├── IF hermesHooks.enabled AND runtime != "hermes"
+     │   └── Inject enriched context via HermesContextService
+     └── Spawn executor (hermes, claude, codex, gemini)
+```
+
+### 📊 Hermes Data Connector
+
+Separate from the runtime, the **HermesDataConnector** exposes Hermes data via `/api/hermes/*`:
 
 | Feature | Description |
 |---------|-------------|
@@ -22,21 +60,7 @@ Hermes is **not a Claude Code wrapper**. It's an **extension layer for Jinn** th
 | **H · Skills** | Browse, search, and manage reusable skill library |
 | **H · Wiki** | Multi-wiki browser with tree view, search, and in-browser editing |
 
-### 🧠 Bus-Not-Brain Philosophy
-
-Jinn is a **bus, not a brain**. It orchestrates engines — Claude Code, Codex, Gemini, Ollama — without reinventing their logic.
-
-```
-JINN (bus)
-├── Engines: Claude Code, Codex, Gemini, Ollama (directly invocable)
-├── Hermes Layer: memory, skills, Honcho, wiki (extends Jinn features)
-├── Org System: departments, agents, task boards
-└── Connectors: Slack, Discord, Telegram, Cron
-```
-
-**Claude Code is invocable directly by Jinn** through the org system. Hermes features are available regardless of which engine you use — they extend Jinn itself, not any specific engine.
-
-If you don't want Hermes features, don't use them. The core Jinn functionality works independently.
+This is a **read-only data connector** — it doesn't intercept Jinn sessions.
 
 ---
 
@@ -158,26 +182,39 @@ skills:
 │                         JINN GATEWAY                            │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐ │
-│  │                    ENGINE LAYER                            │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐     │ │
-│  │  │  Claude  │ │  Codex   │ │  Gemini  │ │  Ollama  │     │ │
-│  │  │   Code   │ │   SDK    │ │   CLI    │ │  local   │     │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘     │ │
+│  │                    SESSION MANAGER                         │ │
+│  │  • Resolve runtimeRef from employee/routing config         │ │
+│  │  • Apply fallback chain if runtime unavailable             │ │
+│  │  • Enrich context via HermesContextService (if hooks on)   │ │
 │  └───────────────────────────────────────────────────────────┘ │
 │                              │                                  │
+│         ┌────────────────────┼────────────────────┐            │
+│         ▼                    ▼                    ▼            │
+│  ┌─────────────┐  ┌──────────────────┐  ┌─────────────┐       │
+│  │   HERMES    │  │  HERMES CONTEXT  │  │  EXECUTORS  │       │
+│  │  EXECUTOR   │  │     SERVICE      │  │             │       │
+│  │             │  │   (middleware)   │  │ ┌─────────┐ │       │
+│  │ spawn:      │  │                  │  │ │ claude  │ │       │
+│  │ hermes chat │  │ IF runtime !=    │  │ ├─────────┤ │       │
+│  │             │  │ hermes AND       │  │ │ codex   │ │       │
+│  │ Native:     │  │ hooks.enabled:   │  │ ├─────────┤ │       │
+│  │ • memory    │  │                  │  │ │ gemini  │ │       │
+│  │ • skills    │  │ → Honcho memory  │  │ └─────────┘ │       │
+│  │ • MCP       │  │ → Skills summary │  │             │       │
+│  │ • Honcho    │  │ → MCP tools      │  │ Receive     │       │
+│  └─────────────┘  │                  │  │ enriched    │       │
+│                   │ Prepend to       │  │ context     │       │
+│                   │ system prompt    │  │             │       │
+│                   └──────────────────┘  └─────────────┘       │
+│                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐ │
-│  │              HERMES FEATURE LAYER (optional)               │ │
-│  │  Memory · Skills · Honcho · Wiki · Session History         │ │
+│  │              HERMES DATA CONNECTOR (read-only)             │ │
+│  │  /api/hermes/* → Sessions · Memory · Skills · Wiki         │ │
 │  └───────────────────────────────────────────────────────────┘ │
-│                              │                                  │
+│                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐ │
-│  │           SESSION MANAGER + ORG SYSTEM                     │ │
-│  │  Routing · Queue · Cron · Departments · Task Boards        │ │
-│  └───────────────────────────────────────────────────────────┘ │
-│                              │                                  │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │                    CONNECTORS                              │ │
-│  │  Slack · Discord · Telegram · WhatsApp · Webhooks          │ │
+│  │           ORG SYSTEM · CONNECTORS · CRON                   │ │
+│  │  Departments · Task Boards · Slack · Discord · Telegram    │ │
 │  └───────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                                │
@@ -189,8 +226,8 @@ skills:
 │  │  Chat   │ │   Org   │ │  Cron   │ │ Workflows │             │
 │  └─────────┘ └─────────┘ └─────────┘ └───────────┘             │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐             │
-│  │Sessions │ │ Memory  │ │ Honcho  │ │   Wiki    │  ← Hermes   │
-│  └─────────┘ └─────────┘ └─────────┘ └───────────┘    features │
+│  │H·Session│ │H·Memory │ │H·Honcho │ │  H·Wiki   │  ← Hermes   │
+│  └─────────┘ └─────────┘ └─────────┘ └───────────┘    data     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
