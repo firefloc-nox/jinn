@@ -162,8 +162,13 @@ export function useHonchoWorkspaces() {
     retry: 1,
   })
 
+  // Ensure workspaces is always an array (defensive against API format changes)
+  const workspaces = Array.isArray(data?.workspaces) 
+    ? data.workspaces 
+    : []
+    
   return {
-    workspaces: data?.workspaces ?? [],
+    workspaces,
     loading: isLoading,
     unavailable: isError,
   }

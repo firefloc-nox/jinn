@@ -67,7 +67,8 @@ function WorkspaceSelector({
   selected: string | null
   onSelect: (id: string) => void
 }) {
-  if (workspaces.length === 0) return null
+  // Defensive: ensure workspaces is an array
+  if (!Array.isArray(workspaces) || workspaces.length === 0) return null
 
   return (
     <select
@@ -157,7 +158,10 @@ export default function HonchoMemoryPage() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const { workspaces, loading: loadingWorkspaces, unavailable } = useHonchoWorkspaces()
+  const { workspaces: rawWorkspaces, loading: loadingWorkspaces, unavailable } = useHonchoWorkspaces()
+  
+  // Defensive: ensure workspaces is always an array
+  const workspaces = Array.isArray(rawWorkspaces) ? rawWorkspaces : []
 
   // Auto-select first workspace
   useEffect(() => {
@@ -178,7 +182,10 @@ export default function HonchoMemoryPage() {
     debouncedQuery
   )
 
-  const displayedItems = debouncedQuery ? searchResults : conclusions
+  // Defensive: ensure all arrays are actually arrays
+  const safeConclusions = Array.isArray(conclusions) ? conclusions : []
+  const safeSearchResults = Array.isArray(searchResults) ? searchResults : []
+  const displayedItems = debouncedQuery ? safeSearchResults : safeConclusions
   const isLoading = loadingWorkspaces || loadingMemory || loadingSearch
 
   return (
