@@ -83,6 +83,31 @@ export interface DoneNodeConfig {
   output_var?: string;
 }
 
+export interface HttpNodeConfig {
+  url: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  headers?: Record<string, string>;
+  body?: string;
+  output_var?: string;
+}
+
+export interface SetVarNodeConfig {
+  variable: string;
+  value: string;
+}
+
+export interface TransformNodeConfig {
+  input_var: string;
+  operation: 'json_parse' | 'json_stringify' | 'uppercase' | 'lowercase' | 'trim' | 'regex_extract';
+  regex?: string;
+  output_var: string;
+}
+
+export interface LogNodeConfig {
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}
+
 export type NodeConfig =
   | TriggerNodeConfig
   | AgentNodeConfig
@@ -91,7 +116,11 @@ export type NodeConfig =
   | NotifyNodeConfig
   | WaitNodeConfig
   | CronNodeConfig
-  | DoneNodeConfig;
+  | DoneNodeConfig
+  | HttpNodeConfig
+  | SetVarNodeConfig
+  | TransformNodeConfig
+  | LogNodeConfig;
 
 // ── Workflow Definition ────────────────────────────────────────────────────
 
@@ -102,14 +131,29 @@ export interface WorkflowTrigger {
   filter?: Record<string, unknown>;
 }
 
+/**
+ * Retry configuration for workflow nodes.
+ * When a node fails, it can be automatically retried based on these settings.
+ */
+export interface RetryConfig {
+  /** Maximum number of retries (0 = no retry, default: 0) */
+  maxRetries?: number;
+  /** Delay in milliseconds before each retry attempt (default: 1000ms) */
+  retryDelayMs?: number;
+}
+
 export interface WorkflowNode {
   id: string;
   type: NodeType;
   label?: string;
   position?: { x: number; y: number };
   config: NodeConfig;
+  /** @deprecated Use retry.maxRetries instead */
   max_attempts?: number;
+  /** @deprecated Use retry.retryDelayMs instead */
   retry_delay_ms?: number;
+  /** Retry configuration for this node */
+  retry?: RetryConfig;
 }
 
 export interface WorkflowEdge {
