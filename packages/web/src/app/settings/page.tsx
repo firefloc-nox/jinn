@@ -11,6 +11,7 @@ import type { ThemeId } from "@/lib/themes"
 import { api, type StatusResponse } from "@/lib/api"
 import { EmojiPicker } from "@/components/ui/emoji-picker"
 import { getAvailableBrains, getBrainConfigSnapshot, moveFallbackBrain, sanitizeConfigForSave } from "@/lib/brain-settings"
+import { hermesApi, type HermesProvidersResponse, type HermesProfileSummary } from "@/lib/hermes-api"
 
 // ---------------------------------------------------------------------------
 // Accent color presets
@@ -258,6 +259,302 @@ const WHISPER_LANGUAGES: Record<string, string> = {
   no: "Norwegian", sk: "Slovak", hr: "Croatian", ca: "Catalan", th: "Thai",
   vi: "Vietnamese", id: "Indonesian", ms: "Malay", tl: "Filipino", sr: "Serbian",
   lt: "Lithuanian", lv: "Latvian", sl: "Slovenian", et: "Estonian",
+}
+
+// ---------------------------------------------------------------------------
+// Hermes Profiles & Providers — self-contained state
+// ---------------------------------------------------------------------------
+
+function HermesSettingsSection() {
+  const [data, setData] = useState<HermesProvidersResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [editingProfile, setEditingProfile] = useState<string | null>(null)
+  const [editModel, setEditModel] = useState("")
+  const [editProvider, setEditProvider] = useState("")
+  const [editEffort, setEditEffort] = useState("")
+  const [editMaxTurns, setEditMaxTurns] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [saveOk, setSaveOk] = useState<string | null>(null)
+
+  useEffect(() => {
+    hermesApi.getProviders()
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
+      .finally(() => setLoading(false))
+  }, [])
+
+  function startEditing(profile: HermesProfileSummary) {
+    setEditingProfile(profile.name)
+    setEditModel(profile.model ?? "")
+    setEditProvider(profile.provider ?? "")
+    setEditEffort(profile.reasoning_effort ?? "")
+    setEditMaxTurns(profile.max_turns != null ? String(profile.max_turns) : "")
+    setSaveOk(null)
+  }
+
+  async function handleSave(profileName: string) {
+    setSaving(true)
+    setSaveOk(null)
+    try {
+      const patch: Record<string, unknown> = {}
+
+      // Build model block — if provider or base_url needed, use dict format
+      if (editProvider) {
+        // Find base_url from known providers
+        const allProviders = [...(data?.global.providers ?? []), ...(data?.global.customProviders ?? [])]
+        const found = allProviders.find(p => p.name === editProvider)
+
+        const modelBlock: Record<string, unknown> = { default: editModel || undefined }
+        modelBlock.provider = editProvider
+        if (found?.base_url) modelBlock.base_url = found.base_url
+        patch.model = modelBlock
+      } else if (editModel) {
+        patch.model = editModel
+      }
+
+      if (editEffort) patch.reasoning_effort = editEffort
+      if (editMaxTurns) patch.max_turns = Number(editMaxTurns)
+
+      await hermesApi.updateProfileConfig(profileName, patch)
+
+      // Refresh data
+      const fresh = await hermesApi.getProviders()
+      setData(fresh)
+      setSaveOk(profileName)
+      setTimeout(() => setSaveOk(null), 2000)
+      setEditingProfile(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <Section title="Hermes Profiles">
+        <div className="flex items-center gap-[var(--space-2)] text-[length:var(--text-footnote)] text-[var(--text-tertiary)]">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading Hermes configuration…
+        </div>
+      </Section>
+    )
+  }
+
+  if (error && !data) {
+    return (
+      <Section title="Hermes Profiles">
+        <div className="text-[length:var(--text-footnote)] text-[var(--system-red)]">
+          {error}
+        </div>
+      </Section>
+    )
+  }
+
+  if (!data) return null
+
+  const allProviders = [...data.global.providers, ...data.global.customProviders]
+  const availableProviders = allProviders.filter(p => p.has_key || p.type === "custom")
+  const unavailableProviders = allProviders.filter(p => !p.has_key && p.type !== "custom")
+
+  return (
+    <Section title="Hermes Profiles">
+      <div className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] mb-[var(--space-3)]">
+        Each Hermes profile owns its model and provider. Jinn delegates to Hermes as an engine — the profile decides which LLM to use.
+      </div>
+
+      {/* Global default */}
+      <div className="mb-[var(--space-4)] p-[var(--space-3)] rounded-[var(--radius-sm)] bg-[var(--fill-tertiary)]">
+        <div className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-1)]">
+          Default Config (~/.hermes/config.yaml)
+        </div>
+        <div className="flex gap-[var(--space-4)] text-[length:var(--text-footnote)] text-[var(--text-secondary)]">
+          <span>Model: <strong className="text-[var(--text-primary)]">{data.global.defaultModel || "—"}</strong></span>
+          <span>Provider: <strong className="text-[var(--text-primary)]">{data.global.defaultProvider || "auto"}</strong></span>
+        </div>
+      </div>
+
+      {/* Providers status */}
+      <div className="mb-[var(--space-4)]">
+        <div className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
+          Providers
+        </div>
+        <div className="flex flex-wrap gap-[var(--space-2)]">
+          {allProviders.map((p) => (
+            <div
+              key={p.name}
+              className="inline-flex items-center gap-[var(--space-1)] px-[8px] py-[3px] rounded-[var(--radius-sm)] bg-[var(--fill-secondary)] text-[length:var(--text-caption1)]"
+            >
+              <div
+                className="w-[6px] h-[6px] rounded-full shrink-0"
+                style={{
+                  background: (p.has_key || p.type === "custom")
+                    ? "var(--system-green)"
+                    : "var(--system-red)",
+                }}
+              />
+              <span className="font-[var(--weight-medium)] text-[var(--text-primary)]">{p.name}</span>
+              {p.type === "custom" && (
+                <span className="text-[var(--text-tertiary)] text-[length:var(--text-caption2)]">custom</span>
+              )}
+            </div>
+          ))}
+        </div>
+        {unavailableProviders.length > 0 && (
+          <div className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mt-[var(--space-1)]">
+            {unavailableProviders.map(p => p.name).join(", ")} — no API key configured
+          </div>
+        )}
+      </div>
+
+      {/* Profiles table */}
+      <div className="border-t border-[var(--separator)] pt-[var(--space-3)]">
+        <div className="text-[length:var(--text-caption1)] font-[var(--weight-semibold)] text-[var(--text-tertiary)] mb-[var(--space-2)]">
+          Profile Configuration
+        </div>
+        <div className="space-y-[var(--space-2)]">
+          {data.profiles.map((profile) => {
+            const isEditing = editingProfile === profile.name
+            const justSaved = saveOk === profile.name
+
+            return (
+              <div
+                key={profile.name}
+                className="rounded-[var(--radius-sm)] border border-[var(--separator)] p-[var(--space-3)]"
+              >
+                {/* Profile header */}
+                <div className="flex items-center justify-between mb-[var(--space-2)]">
+                  <div className="flex items-center gap-[var(--space-2)]">
+                    <span className="text-[length:var(--text-subheadline)] font-[var(--weight-semibold)] text-[var(--text-primary)]">
+                      {profile.name}
+                    </span>
+                    {profile.usedBy && profile.usedBy.length > 0 && (
+                      <span className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] bg-[var(--fill-tertiary)] px-[6px] py-[1px] rounded-[var(--radius-sm)]">
+                        {profile.usedBy.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-[var(--space-2)]">
+                    {justSaved && (
+                      <Check className="w-4 h-4 text-[var(--system-green)]" />
+                    )}
+                    {!isEditing ? (
+                      <button
+                        onClick={() => startEditing(profile)}
+                        className="text-[length:var(--text-caption1)] text-[var(--accent)] cursor-pointer bg-transparent border-none font-[var(--weight-medium)]"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <div className="flex gap-[var(--space-1)]">
+                        <button
+                          onClick={() => handleSave(profile.name)}
+                          disabled={saving}
+                          className="text-[length:var(--text-caption1)] text-[var(--system-green)] cursor-pointer bg-transparent border-none font-[var(--weight-semibold)]"
+                        >
+                          {saving ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          onClick={() => setEditingProfile(null)}
+                          className="text-[length:var(--text-caption1)] text-[var(--text-tertiary)] cursor-pointer bg-transparent border-none"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Read-only view */}
+                {!isEditing && (
+                  <div className="flex gap-[var(--space-4)] text-[length:var(--text-caption1)] text-[var(--text-secondary)]">
+                    <span>Model: <strong className="text-[var(--text-primary)]">{profile.model || "inherited"}</strong></span>
+                    <span>Provider: <strong className="text-[var(--text-primary)]">{profile.provider || "inherited"}</strong></span>
+                    {profile.reasoning_effort && (
+                      <span>Effort: <strong className="text-[var(--text-primary)]">{profile.reasoning_effort}</strong></span>
+                    )}
+                    {profile.max_turns != null && (
+                      <span>Max turns: <strong className="text-[var(--text-primary)]">{profile.max_turns}</strong></span>
+                    )}
+                  </div>
+                )}
+
+                {/* Edit view */}
+                {isEditing && (
+                  <div className="space-y-[var(--space-2)]">
+                    <div className="grid grid-cols-2 gap-[var(--space-2)]">
+                      <div>
+                        <label className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[2px] block">Model</label>
+                        <input
+                          type="text"
+                          value={editModel}
+                          onChange={(e) => setEditModel(e.target.value)}
+                          placeholder="e.g. xiaomi/mimo-v2-pro"
+                          className="apple-input w-full bg-[var(--bg-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm)] px-[8px] py-[4px] text-[length:var(--text-caption1)] text-[var(--text-primary)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[2px] block">Provider</label>
+                        <select
+                          value={editProvider}
+                          onChange={(e) => setEditProvider(e.target.value)}
+                          className="w-full bg-[var(--bg-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm)] px-[8px] py-[4px] text-[length:var(--text-caption1)] text-[var(--text-primary)] cursor-pointer"
+                        >
+                          <option value="">Inherited (default)</option>
+                          {availableProviders.map((p) => (
+                            <option key={p.name} value={p.name}>
+                              {p.name}{p.type === "custom" ? " (custom)" : ""}
+                            </option>
+                          ))}
+                          {unavailableProviders.map((p) => (
+                            <option key={p.name} value={p.name} disabled>
+                              {p.name} (no key)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-[var(--space-2)]">
+                      <div>
+                        <label className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[2px] block">Reasoning Effort</label>
+                        <select
+                          value={editEffort}
+                          onChange={(e) => setEditEffort(e.target.value)}
+                          className="w-full bg-[var(--bg-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm)] px-[8px] py-[4px] text-[length:var(--text-caption1)] text-[var(--text-primary)] cursor-pointer"
+                        >
+                          <option value="">Default</option>
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="xhigh">Extra High</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[length:var(--text-caption2)] text-[var(--text-tertiary)] mb-[2px] block">Max Turns</label>
+                        <input
+                          type="number"
+                          value={editMaxTurns}
+                          onChange={(e) => setEditMaxTurns(e.target.value)}
+                          placeholder="30"
+                          className="apple-input w-full bg-[var(--bg-secondary)] border border-[var(--separator)] rounded-[var(--radius-sm)] px-[8px] py-[4px] text-[length:var(--text-caption1)] text-[var(--text-primary)]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-[var(--space-2)] text-[length:var(--text-caption1)] text-[var(--system-red)]">
+          {error}
+        </div>
+      )}
+    </Section>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1092,6 +1389,9 @@ export default function SettingsPage() {
                   Lets Hermes-first sessions expose MCP tools when your gateway MCP server is enabled.
                 </div>
               </Section>
+
+              {/* -- Hermes Profiles & Providers -- */}
+              <HermesSettingsSection />
 
               {/* -- Section 4: Engine Configuration -- */}
               <Section title="Engine Configuration">

@@ -396,7 +396,9 @@ export class SessionManager {
         systemPrompt,
         cwd: JINN_HOME,
         bin: engineConfig.bin,
-        model: session.model ?? engineConfig.model,
+        // For Hermes engine: don't pass model from Jinn config — the Hermes
+        // profile (--profile) owns model+provider selection.
+        model: session.model ?? (resolvedEngine === "hermes" ? undefined : engineConfig.model),
         effortLevel,
         cliFlags: employee?.cliFlags,
         mcpConfigPath,

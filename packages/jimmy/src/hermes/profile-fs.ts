@@ -173,6 +173,161 @@ export function deleteProfile(name: string): boolean {
   return true;
 }
 
+// ─── Hermes global config reading ────────────────────────────────────────────
+
+function hermesHome(): string {
+  return process.env.HERMES_HOME ?? path.join(process.env.HOME ?? os.homedir(), ".hermes");
+}
+
+/** Provider entry from Hermes config.yaml. */
+export interface HermesProviderInfo {
+  name: string;
+  type: "builtin" | "custom";
+  base_url?: string;
+  has_key: boolean;
+}
+
+/** Summary of a profile's model/provider config for the settings UI. */
+export interface HermesProfileSummary {
+  name: string;
+  model?: string;
+  provider?: string;
+  base_url?: string;
+  reasoning_effort?: string;
+  max_turns?: number;
+  /** Which employee(s) use this profile, if any. */
+  usedBy?: string[];
+}
+
+/**
+ * Read the main Hermes config (~/.hermes/config.yaml) and extract
+ * providers, custom_providers, and the default model/provider.
+ */
+export function readHermesGlobalConfig(): {
+  defaultModel?: string;
+  defaultProvider?: string;
+  defaultBaseUrl?: string;
+  providers: HermesProviderInfo[];
+  customProviders: HermesProviderInfo[];
+} {
+  const configPath = path.join(hermesHome(), "config.yaml");
+  if (!fs.existsSync(configPath)) {
+    return { providers: [], customProviders: [] };
+  }
+
+  let raw: Record<string, unknown> = {};
+  try {
+    const content = fs.readFileSync(configPath, "utf-8");
+    const parsed = yaml.load(content);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>;
+    }
+  } catch (err) {
+    logger.warn(`[profile-fs] Failed to read Hermes global config: ${err}`);
+    return { providers: [], customProviders: [] };
+  }
+
+  // Extract default model config
+  const modelBlock = raw.model as Record<string, unknown> | string | undefined;
+  let defaultModel: string | undefined;
+  let defaultProvider: string | undefined;
+  let defaultBaseUrl: string | undefined;
+  if (typeof modelBlock === "string") {
+    defaultModel = modelBlock;
+  } else if (modelBlock && typeof modelBlock === "object") {
+    defaultModel = (modelBlock.default ?? modelBlock.model) as string | undefined;
+    defaultProvider = modelBlock.provider as string | undefined;
+    defaultBaseUrl = modelBlock.base_url as string | undefined;
+  }
+
+  // Extract named providers from `providers:` block
+  const providers: HermesProviderInfo[] = [];
+  const providersBlock = raw.providers as Record<string, unknown> | undefined;
+  if (providersBlock && typeof providersBlock === "object") {
+    for (const [key, val] of Object.entries(providersBlock)) {
+      if (val && typeof val === "object") {
+        const p = val as Record<string, unknown>;
+        providers.push({
+          name: (p.name as string) ?? key,
+          type: "builtin",
+          base_url: p.api as string | undefined,
+          has_key: !!(p.api_key as string),
+        });
+      }
+    }
+  }
+
+  // Extract custom_providers
+  const customProviders: HermesProviderInfo[] = [];
+  const customBlock = raw.custom_providers as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(customBlock)) {
+    for (const entry of customBlock) {
+      if (entry && typeof entry === "object") {
+        customProviders.push({
+          name: (entry.name as string) ?? "unknown",
+          type: "custom",
+          base_url: entry.base_url as string | undefined,
+          has_key: !!(entry.api_key as string),
+        });
+      }
+    }
+  }
+
+  // Add well-known providers from env vars
+  const envProviders: Array<{ name: string; envKey: string }> = [
+    { name: "anthropic", envKey: "ANTHROPIC_API_KEY" },
+    { name: "openrouter", envKey: "OPENROUTER_API_KEY" },
+    { name: "openai", envKey: "OPENAI_API_KEY" },
+    { name: "nous", envKey: "NOUS_API_KEY" },
+  ];
+
+  for (const ep of envProviders) {
+    if (!providers.some(p => p.name === ep.name) && !customProviders.some(p => p.name === ep.name)) {
+      const hasKey = !!process.env[ep.envKey];
+      providers.push({ name: ep.name, type: "builtin", has_key: hasKey });
+    }
+  }
+
+  return { defaultModel, defaultProvider, defaultBaseUrl, providers, customProviders };
+}
+
+/**
+ * Get all profiles with their model/provider summary for the settings UI.
+ */
+export function listProfileSummaries(): HermesProfileSummary[] {
+  const names = listProfiles();
+  return names.map(name => {
+    const data = readHermesProfile(name);
+    const cfg = data.config;
+
+    // Handle model block that can be string or object
+    let model: string | undefined;
+    let provider: string | undefined;
+    let base_url: string | undefined;
+
+    const modelField = cfg.model;
+    if (typeof modelField === "string") {
+      model = modelField;
+    } else if (modelField && typeof modelField === "object") {
+      const m = modelField as Record<string, unknown>;
+      model = (m.default ?? m.model) as string | undefined;
+      provider = m.provider as string | undefined;
+      base_url = m.base_url as string | undefined;
+    }
+
+    if (!provider && cfg.provider) provider = cfg.provider as string;
+
+    return {
+      name,
+      model,
+      provider,
+      base_url,
+      reasoning_effort: cfg.reasoning_effort as string | undefined,
+      max_turns: cfg.max_turns != null ? Number(cfg.max_turns) : undefined,
+    };
+  });
+}
+
 /**
  * List all available Hermes profile names.
  * Returns empty array when ~/.hermes/profiles/ is absent.

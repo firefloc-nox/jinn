@@ -34,10 +34,12 @@ export async function runCronJob(
 
   try {
     const effectiveEngine = job.engine || employee?.engine || config.engines.default || "hermes";
+    // For Hermes engine: don't inject model from Jinn config — the Hermes
+    // profile owns model+provider selection. Only use explicit job/employee overrides.
     const effectiveModel = job.model
       || employee?.model
       || (effectiveEngine === "hermes"
-        ? config.engines.hermes?.model
+        ? undefined
         : (config.engines as Record<string, { model?: string } | undefined>)[effectiveEngine]?.model);
 
     const routeResult = await sessionManager.route(

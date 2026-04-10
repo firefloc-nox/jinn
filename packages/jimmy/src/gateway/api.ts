@@ -1940,6 +1940,30 @@ Handle this as a priority request from a colleague.`;
       return json(res, { status: "removed", name: params.name });
     }
 
+    // GET /api/hermes/providers — list Hermes providers, profiles, and their model/provider config
+    if (method === "GET" && pathname === "/api/hermes/providers") {
+      const { readHermesGlobalConfig, listProfileSummaries } = await import("../hermes/profile-fs.js");
+      const { scanOrg } = await import("./org.js");
+
+      const globalConfig = readHermesGlobalConfig();
+      const profiles = listProfileSummaries();
+
+      // Enrich profiles with employee usage info
+      const orgRegistry = scanOrg();
+      for (const profile of profiles) {
+        const usedBy: string[] = [];
+        for (const [empName, emp] of orgRegistry) {
+          if (emp.hermesProfile === profile.name) usedBy.push(empName);
+        }
+        if (usedBy.length > 0) profile.usedBy = usedBy;
+      }
+
+      return json(res, {
+        global: globalConfig,
+        profiles,
+      });
+    }
+
     // GET /api/hermes/profiles — list available Hermes profiles for UI/employee creation
     if (method === "GET" && pathname === "/api/hermes/profiles") {
       const { listProfiles } = await import("../hermes/profile-fs.js");
@@ -3202,9 +3226,12 @@ async function runWebSession(
       systemPrompt,
       cwd: JINN_HOME,
       bin: engineConfig.bin,
+      // For Hermes engine: don't pass model — the Hermes profile (--profile)
+      // owns model+provider selection. Only pass model if explicitly set on the
+      // session (e.g. per-session override from the web UI).
+      // For other engines (claude, codex, gemini): use config chain as before.
       model: currentSession.model
-        ?? (currentSession.engine === "hermes" ? config.engines.hermes?.model : undefined)
-        ?? engineConfig.model,
+        ?? (currentSession.engine === "hermes" ? undefined : engineConfig.model),
       effortLevel,
       cliFlags: employee?.cliFlags,
       attachments: attachments?.length ? attachments : undefined,

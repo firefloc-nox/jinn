@@ -146,4 +146,52 @@ export const hermesApi = {
   getCron: () => hermesGet<HermesCronJob[]>("/api/hermes/cron"),
 
   getModels: () => hermesGet<{ models: HermesModel[] }>("/api/hermes/models"),
+
+  /** Hermes provider & profile management */
+  getProviders: () => hermesGet<HermesProvidersResponse>("/api/hermes/providers"),
+
+  /** Update a profile's model/provider config */
+  updateProfileConfig: (name: string, config: Record<string, unknown>) =>
+    hermesPatch<HermesProfileDetail>(`/api/hermes/profiles/${encodeURIComponent(name)}`, { config }),
+}
+
+// ---------------------------------------------------------------------------
+// Provider types
+// ---------------------------------------------------------------------------
+
+export interface HermesProviderInfo {
+  name: string
+  type: "builtin" | "custom"
+  base_url?: string
+  has_key: boolean
+}
+
+export interface HermesProfileSummary {
+  name: string
+  model?: string
+  provider?: string
+  base_url?: string
+  reasoning_effort?: string
+  max_turns?: number
+  usedBy?: string[]
+}
+
+export interface HermesProvidersResponse {
+  global: {
+    defaultModel?: string
+    defaultProvider?: string
+    defaultBaseUrl?: string
+    providers: HermesProviderInfo[]
+    customProviders: HermesProviderInfo[]
+  }
+  profiles: HermesProfileSummary[]
+}
+
+export interface HermesProfileDetail {
+  name: string
+  exists: boolean
+  config: Record<string, unknown>
+  soul: string | null
+  agent: string | null
+  role_soul: string | null
 }
