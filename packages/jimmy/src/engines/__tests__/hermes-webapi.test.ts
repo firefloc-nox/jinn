@@ -266,6 +266,33 @@ describe("HermesWebAPITransport.chat()", () => {
     const messages = [{ role: "user" as const, content: "test" }];
     await expect(transport.chat(messages, {})).rejects.toThrow("timed out");
   });
+
+  it("handles [DONE] without trailing newlines", async () => {
+    const req = createMockReq();
+    const res = createMockRes(200);
+
+    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
+      cb(res);
+      // Send content chunks normally, then [DONE] without a trailing \n\n
+      // so it stays in the buffer when "end" fires
+      const normalChunks =
+        openaiChunk("chatcmpl-nodone", "Hello ") +
+        openaiChunk("chatcmpl-nodone", "world", "stop");
+      // No trailing newlines after [DONE] — mimics the edge case
+      const doneWithoutNewlines = "data: [DONE]";
+      res.emit("data", Buffer.from(normalChunks + doneWithoutNewlines));
+      res.emit("end");
+      return req;
+    });
+
+    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
+    const messages = [{ role: "user" as const, content: "test" }];
+    const result = await transport.chat(messages, {});
+
+    expect(result.result).toBe("Hello world");
+    expect(result.completed).toBe(true);
+    expect(result.chatcmplId).toBe("chatcmpl-nodone");
+  });
 });
 
 // ---------------------------------------------------------------------------

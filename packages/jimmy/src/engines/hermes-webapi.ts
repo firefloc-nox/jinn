@@ -201,6 +201,31 @@ export class HermesWebAPITransport {
           });
 
           res.on("end", () => {
+            // Process any remaining buffered line (e.g., final [DONE] without trailing newlines)
+            if (buffer.trim()) {
+              const remaining = buffer.trim();
+              if (remaining.startsWith("data: ")) {
+                const payload = remaining.slice(6);
+                if (payload === "[DONE]") {
+                  completed = true;
+                } else {
+                  try {
+                    const data = JSON.parse(payload) as Record<string, unknown>;
+                    const choices = data["choices"] as Array<Record<string, unknown>> | undefined;
+                    if (choices?.[0]) {
+                      const delta = choices[0]["delta"] as Record<string, unknown> | undefined;
+                      if (typeof delta?.["content"] === "string" && delta["content"]) {
+                        result += delta["content"];
+                        onDelta?.({ type: "text", content: delta["content"] as string });
+                      }
+                      if (choices[0]["finish_reason"] === "stop") {
+                        completed = true;
+                      }
+                    }
+                  } catch { /* malformed — skip */ }
+                }
+              }
+            }
             resolve({
               result,
               chatcmplId,
