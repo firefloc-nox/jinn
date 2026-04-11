@@ -1,27 +1,15 @@
 /**
  * HermesWebAPITransport — transport HTTP vers Hermes WebAPI (port 8642).
  *
- * Remplace le spawn CLI pour le chat. Pas de parse stdout, pas de LACP_BYPASS,
- * streaming SSE natif via http.request Node.js.
+ * Utilise le protocole OpenAI-compatible exposé par le serveur Hermes :
+ *   GET  /health              → { status: "ok" }
+ *   GET  /v1/models           → OpenAI models list
+ *   POST /v1/chat/completions → OpenAI chat completions (stream: true)
  *
- * Protocole SSE Hermes WebAPI :
- *   event: session.created   → { session_id, run_id, seq, title, model }
- *   event: run.started       → { user_message: { id, role, content } }
- *   event: message.started   → { message: { id, role } }
- *   event: assistant.delta   → { message_id, delta }
- *   event: tool.pending      → { tool_name, preview, args }
- *   event: tool.started      → { tool_name, preview, args }
- *   event: tool.completed    → { tool_name, tool_call_id, result_preview }
- *   event: tool.failed       → { tool_name, tool_call_id, result_preview }
- *   event: assistant.completed → { message_id, content, completed, partial, interrupted }
- *   event: run.completed     → { message_id, completed, partial, interrupted, api_calls }
- *   event: error             → { message }
- *   event: done              → {} (sentinel de fin)
- *
- * Profile handling :
- *   ChatRequest n'expose pas de champ profile. On passe hermesProfile via
- *   source="jinn-<profile>" dans POST /api/sessions pour tracking.
- *   La session utilise le modèle/config du profil que la WebAPI a été démarrée avec.
+ * Streaming SSE format (OpenAI standard) :
+ *   data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"text"},"finish_reason":null}]}
+ *   data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{...}}
+ *   data: [DONE]
  *
  * Fallback :
  *   isAvailable() checke GET /health. Résultat mis en cache 30s.
@@ -37,28 +25,23 @@ export interface WebAPIConfig {
   host: string;
 }
 
-interface CreateSessionOpts {
-  model?: string;
-  systemPrompt?: string;
-  source?: string;
-  title?: string;
+interface ChatCompletionMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface ChatCompletionRequest {
+  model: string;
+  messages: ChatCompletionMessage[];
+  stream: boolean;
 }
 
 interface StreamChatResult {
   result: string;
-  hermesSessionId: string;
+  chatcmplId: string;
   meta: HermesRuntimeMeta;
   outputTokens: number;
-  apiCalls: number;
   completed: boolean;
-  interrupted: boolean;
-}
-
-interface ChatRequestBody {
-  message: string;
-  model?: string;
-  system_message?: string;
-  enabled_toolsets?: string[];
 }
 
 /** Cache du résultat isAvailable() — évite les health checks répétés */
@@ -113,80 +96,18 @@ export class HermesWebAPITransport {
   }
 
   /**
-   * Crée une session Hermes via POST /api/sessions.
-   * Retourne l'hermesSessionId (format "sess_<hex>").
-   * Passe hermesProfile via source="jinn-<profile>" pour tracking.
-   */
-  async createSession(opts: CreateSessionOpts): Promise<string> {
-    const body = JSON.stringify({
-      source: opts.source ?? "jinn",
-      model: opts.model,
-      system_prompt: opts.systemPrompt,
-      title: opts.title,
-    });
-
-    return new Promise<string>((resolve, reject) => {
-      const req = http.request(
-        {
-          hostname: this.config.host,
-          port: this.config.port,
-          path: "/api/sessions",
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(body),
-          },
-          timeout: 10_000,
-        },
-        (res) => {
-          let raw = "";
-          res.on("data", (chunk: Buffer) => {
-            raw += chunk.toString();
-          });
-          res.on("end", () => {
-            if (res.statusCode !== 201 && res.statusCode !== 200) {
-              reject(new Error(`POST /api/sessions failed: HTTP ${res.statusCode} — ${raw.slice(0, 200)}`));
-              return;
-            }
-            try {
-              const parsed = JSON.parse(raw) as { session?: { id?: string }; id?: string };
-              const sessionId = parsed.session?.id ?? (parsed as { id?: string }).id;
-              if (!sessionId) {
-                reject(new Error(`POST /api/sessions: missing session.id in response: ${raw.slice(0, 200)}`));
-                return;
-              }
-              resolve(sessionId);
-            } catch (err) {
-              reject(new Error(`POST /api/sessions: invalid JSON response: ${raw.slice(0, 200)}`));
-            }
-          });
-        },
-      );
-
-      req.on("error", reject);
-      req.on("timeout", () => {
-        req.destroy();
-        reject(new Error("POST /api/sessions timed out"));
-      });
-      req.write(body);
-      req.end();
-    });
-  }
-
-  /**
-   * Envoie un message et stream la réponse SSE.
-   * Agrège les deltas en un résultat final.
+   * Envoie une requête chat completions en streaming et agrège la réponse.
+   * Utilise POST /v1/chat/completions avec stream: true (format OpenAI).
    */
   async chat(
-    hermesSessionId: string,
-    message: string,
-    opts: Pick<EngineRunOpts, "model" | "onStream" | "hermesToolsets">,
+    messages: ChatCompletionMessage[],
+    opts: Pick<EngineRunOpts, "model" | "onStream">,
   ): Promise<StreamChatResult> {
-    const bodyObj: ChatRequestBody = { message };
-    if (opts.model) bodyObj.model = opts.model;
-    if (opts.hermesToolsets) {
-      bodyObj.enabled_toolsets = opts.hermesToolsets.split(",").map((s) => s.trim()).filter(Boolean);
-    }
+    const bodyObj: ChatCompletionRequest = {
+      model: opts.model ?? "hermes-agent",
+      messages,
+      stream: true,
+    };
 
     const body = JSON.stringify(bodyObj);
     const onDelta = opts.onStream;
@@ -196,7 +117,7 @@ export class HermesWebAPITransport {
         {
           hostname: this.config.host,
           port: this.config.port,
-          path: `/api/sessions/${hermesSessionId}/chat/stream`,
+          path: "/v1/chat/completions",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -210,7 +131,7 @@ export class HermesWebAPITransport {
             let errBody = "";
             res.on("data", (chunk: Buffer) => { errBody += chunk.toString(); });
             res.on("end", () => {
-              reject(new Error(`POST /chat/stream HTTP ${res.statusCode}: ${errBody.slice(0, 300)}`));
+              reject(new Error(`POST /v1/chat/completions HTTP ${res.statusCode}: ${errBody.slice(0, 300)}`));
             });
             return;
           }
@@ -218,14 +139,8 @@ export class HermesWebAPITransport {
           let buffer = "";
           let result = "";
           let outputTokens = 0;
-          let apiCalls = 0;
+          let chatcmplId = "";
           let completed = false;
-          let interrupted = false;
-          let errorMsg = "";
-          let done = false;
-          // currentEvent doit persister ENTRE les chunks (un event peut être
-          // découpé : "event:" dans chunk N, "data:" dans chunk N+1).
-          let currentEvent = "";
 
           res.on("data", (chunk: Buffer) => {
             buffer += chunk.toString();
@@ -233,108 +148,65 @@ export class HermesWebAPITransport {
             // La dernière ligne peut être incomplète — la remettre dans le buffer
             buffer = lines.pop() ?? "";
             for (const line of lines) {
-              if (line.startsWith("event: ")) {
-                currentEvent = line.slice(7).trim();
-              } else if (line.startsWith("data: ")) {
-                try {
-                  const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith("data: ")) continue;
 
-                  switch (currentEvent) {
-                    case "assistant.delta": {
-                      const delta = data["delta"];
-                      if (typeof delta === "string" && delta) {
-                        result += delta;
-                        onDelta?.({ type: "text", content: delta });
-                      }
-                      break;
-                    }
-                    case "thinking.delta": {
-                      // Hermes extended thinking — surface to activity panel
-                      const thinkingDelta = data["delta"];
-                      if (typeof thinkingDelta === "string" && thinkingDelta) {
-                        onDelta?.({ type: "thinking", content: thinkingDelta, timestamp: Date.now() });
-                      }
-                      break;
-                    }
-                    case "tool.started": {
-                      // { tool_name, preview, args } — emit tool_use so activity panel shows it
-                      const toolName = typeof data["tool_name"] === "string" ? data["tool_name"] : "unknown";
-                      const toolArgs = data["args"] as Record<string, unknown> | undefined;
-                      onDelta?.({
-                        type: "tool_use",
-                        content: "",
-                        toolName,
-                        toolArgs,
-                        timestamp: Date.now(),
-                      });
-                      break;
-                    }
-                    case "tool.completed":
-                    case "tool.failed": {
-                      // { tool_call_id, tool_name, args, result_preview }
-                      const toolName = typeof data["tool_name"] === "string" ? data["tool_name"] : "unknown";
-                      const toolId = typeof data["tool_call_id"] === "string" ? data["tool_call_id"] : undefined;
-                      const resultPreview = typeof data["result_preview"] === "string" ? data["result_preview"] : "";
-                      const toolArgs = data["args"] as Record<string, unknown> | undefined;
-                      onDelta?.({
-                        type: "tool_result",
-                        content: "",
-                        toolName,
-                        toolId,
-                        toolArgs,
-                        resultContent: resultPreview.slice(0, 500), // cap — full result in DB
-                        timestamp: Date.now(),
-                      });
-                      break;
-                    }
-                    case "tool.pending":
-                      // Precursor to tool.started — skip to avoid duplicate UI entries
-                      break;
-                    case "run.completed":
-                      apiCalls = typeof data["api_calls"] === "number" ? data["api_calls"] : 0;
-                      completed = data["completed"] === true;
-                      interrupted = data["interrupted"] === true;
-                      break;
-                    case "assistant.completed":
-                      // outputTokens n'est pas dans cet event — sera dans run.ended si présent
-                      break;
-                    case "error": {
-                      const msg = data["message"];
-                      if (typeof msg === "string") errorMsg = msg;
-                      break;
-                    }
-                    case "done":
-                      done = true;
-                      break;
-                    default:
-                      // memory.updated, session.created, run.started, message.started, etc.
-                      // No action needed for these events
-                      break;
-                  }
-                  currentEvent = "";
-                } catch {
-                  // ligne malformée, skip
+              const payload = trimmed.slice(6);
+
+              // Sentinel de fin
+              if (payload === "[DONE]") {
+                completed = true;
+                continue;
+              }
+
+              try {
+                const data = JSON.parse(payload) as Record<string, unknown>;
+
+                // Capture chatcmpl ID
+                if (typeof data["id"] === "string" && !chatcmplId) {
+                  chatcmplId = data["id"] as string;
                 }
-              } else if (line === "") {
-                // séparateur d'événement SSE — reset currentEvent
-                currentEvent = "";
+
+                // Extract choices
+                const choices = data["choices"] as Array<Record<string, unknown>> | undefined;
+                if (choices && choices.length > 0) {
+                  const choice = choices[0]!;
+                  const delta = choice["delta"] as Record<string, unknown> | undefined;
+
+                  if (delta) {
+                    const content = delta["content"];
+                    if (typeof content === "string" && content) {
+                      result += content;
+                      onDelta?.({ type: "text", content });
+                    }
+                  }
+
+                  if (choice["finish_reason"] === "stop") {
+                    completed = true;
+                  }
+                }
+
+                // Extract usage from last chunk
+                const usage = data["usage"] as Record<string, unknown> | undefined;
+                if (usage) {
+                  const completionTokens = usage["completion_tokens"];
+                  if (typeof completionTokens === "number") {
+                    outputTokens = completionTokens;
+                  }
+                }
+              } catch {
+                // ligne malformée, skip
               }
             }
           });
 
           res.on("end", () => {
-            if (errorMsg) {
-              reject(new Error(`Hermes WebAPI error: ${errorMsg}`));
-              return;
-            }
             resolve({
               result,
-              hermesSessionId,
+              chatcmplId,
               meta: {},
               outputTokens,
-              apiCalls,
               completed,
-              interrupted,
             });
           });
 
@@ -359,7 +231,7 @@ export class HermesWebAPITransport {
 
 /**
  * Lance un chat via WebAPI à partir des opts HermesEngine.
- * Gère la création de session si nécessaire.
+ * Utilise POST /v1/chat/completions (OpenAI-compatible, stateless).
  * Retourne un EngineResult compatible avec le contrat existant.
  */
 export async function runViaWebAPI(
@@ -367,57 +239,47 @@ export async function runViaWebAPI(
   opts: EngineRunOpts,
   startMs: number,
 ): Promise<EngineResult> {
-  let hermesSessionId = opts.resumeSessionId;
+  // Build messages array
+  const messages: ChatCompletionMessage[] = [];
 
-  // Si le resumeSessionId est un ID CLI (pas "sess_"), créer une nouvelle session WebAPI
-  const isWebAPISession = hermesSessionId?.startsWith("sess_");
-
-  if (!hermesSessionId || !isWebAPISession) {
-    // Source encode le profil pour tracking : "jinn-<profile>" ou "jinn"
-    const source = opts.hermesProfile ? `jinn-${opts.hermesProfile}` : "jinn";
-
-    logger.info(
-      `[HermesEngine/WebAPI] Creating Hermes session` +
-      ` (source=${source}, model=${opts.model || "default"})`,
-    );
-
-    hermesSessionId = await transport.createSession({
-      model: opts.model,
-      systemPrompt: opts.systemPrompt,
-      source,
-      title: undefined,
-    });
-
-    logger.info(`[HermesEngine/WebAPI] Created session: ${hermesSessionId}`);
-  } else {
-    logger.info(`[HermesEngine/WebAPI] Resuming session: ${hermesSessionId}`);
+  // System prompt
+  if (opts.systemPrompt) {
+    let systemContent = opts.systemPrompt;
+    if (opts.systemPromptAddition) {
+      systemContent += `\n\n${opts.systemPromptAddition}`;
+    }
+    messages.push({ role: "system", content: systemContent });
+  } else if (opts.systemPromptAddition) {
+    messages.push({ role: "system", content: opts.systemPromptAddition });
   }
 
-  // Construire le prompt (même logique d'injection systemPrompt que CLI — mais ici systemPrompt
-  // est passé à la session, pas préfixé. On injecte quand même systemPromptAddition si présente.)
-  let prompt = opts.prompt;
+  // User message
+  let userContent = opts.prompt;
   if (opts.attachments?.length) {
-    prompt += "\n\nAttached files:\n" + opts.attachments.map((a) => `- ${a}`).join("\n");
+    userContent += "\n\nAttached files:\n" + opts.attachments.map((a) => `- ${a}`).join("\n");
   }
-  if (opts.systemPromptAddition) {
-    // systemPrompt principal déjà passé à createSession. On préfixe l'addition.
-    prompt = `[CONTEXT]\n${opts.systemPromptAddition}\n[/CONTEXT]\n\n${prompt}`;
-  }
+  messages.push({ role: "user", content: userContent });
 
-  const streamResult = await transport.chat(hermesSessionId, prompt, {
+  logger.info(
+    `[HermesEngine/WebAPI] Sending chat completions request` +
+    ` (model=${opts.model || "hermes-agent"}, messages=${messages.length})`,
+  );
+
+  const streamResult = await transport.chat(messages, {
     model: opts.model,
     onStream: opts.onStream,
-    hermesToolsets: opts.hermesToolsets,
   });
 
   const durationMs = Date.now() - startMs;
 
+  // Use chatcmpl ID as session identifier, or generate a synthetic one
+  const hermesSessionId = streamResult.chatcmplId || `webapi_${Date.now()}`;
+
   logger.info(
-    `[HermesEngine/WebAPI] Run complete: session=${hermesSessionId}` +
+    `[HermesEngine/WebAPI] Run complete: id=${hermesSessionId}` +
     `, result_length=${streamResult.result.length}` +
-    `, api_calls=${streamResult.apiCalls}` +
-    `, completed=${streamResult.completed}` +
-    `, interrupted=${streamResult.interrupted}`,
+    `, output_tokens=${streamResult.outputTokens}` +
+    `, completed=${streamResult.completed}`,
   );
 
   const hermesMeta: HermesRuntimeMeta = {
@@ -429,7 +291,7 @@ export async function runViaWebAPI(
     sessionId: hermesSessionId,
     result: streamResult.result,
     durationMs,
-    numTurns: streamResult.apiCalls || 1,
+    numTurns: 1,
     hermesMeta,
   };
 }

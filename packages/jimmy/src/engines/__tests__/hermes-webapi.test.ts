@@ -41,9 +41,26 @@ function createMockRes(statusCode = 200) {
   return res;
 }
 
-/** Encode un ou plusieurs événements SSE en string. */
-function sseEvent(event: string, data: object): string {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+/** Encode un chunk SSE OpenAI (data: JSON) */
+function openaiChunk(id: string, content?: string, finishReason?: string | null, usage?: Record<string, number>): string {
+  const delta: Record<string, unknown> = {};
+  if (content !== undefined) delta.content = content;
+
+  const choice: Record<string, unknown> = { index: 0, delta, finish_reason: finishReason ?? null };
+  const obj: Record<string, unknown> = {
+    id,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model: "hermes-agent",
+    choices: [choice],
+  };
+  if (usage) obj.usage = usage;
+  return `data: ${JSON.stringify(obj)}\n\n`;
+}
+
+/** Encode le sentinel [DONE] */
+function doneLine(): string {
+  return "data: [DONE]\n\n";
 }
 
 const BASE_OPTS: EngineRunOpts = {
@@ -141,82 +158,32 @@ describe("HermesWebAPITransport.isAvailable()", () => {
 });
 
 // ---------------------------------------------------------------------------
-// createSession()
-// ---------------------------------------------------------------------------
-describe("HermesWebAPITransport.createSession()", () => {
-  it("retourne l'id de session depuis la réponse JSON", async () => {
-    const req = createMockReq();
-    const res = createMockRes(201);
-    const responseBody = JSON.stringify({ session: { id: "sess_abc123" } });
-
-    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
-      cb(res);
-      res.emit("data", Buffer.from(responseBody));
-      res.emit("end");
-      return req;
-    });
-
-    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const sessionId = await transport.createSession({ model: "claude-sonnet-4.6" });
-    expect(sessionId).toBe("sess_abc123");
-  });
-
-  it("accepte aussi id au niveau racine (format alternatif)", async () => {
-    const req = createMockReq();
-    const res = createMockRes(200);
-    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
-      cb(res);
-      res.emit("data", Buffer.from(JSON.stringify({ id: "sess_rootlevel" })));
-      res.emit("end");
-      return req;
-    });
-
-    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const id = await transport.createSession({});
-    expect(id).toBe("sess_rootlevel");
-  });
-
-  it("rejette si HTTP 500", async () => {
-    const req = createMockReq();
-    const res = createMockRes(500);
-    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
-      cb(res);
-      res.emit("data", Buffer.from("Internal Server Error"));
-      res.emit("end");
-      return req;
-    });
-
-    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    await expect(transport.createSession({})).rejects.toThrow("HTTP 500");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// chat() — streaming SSE
+// chat() — streaming SSE (OpenAI format)
 // ---------------------------------------------------------------------------
 describe("HermesWebAPITransport.chat()", () => {
-  it("agrège les deltas assistant.delta en résultat", async () => {
+  it("agrège les deltas content en résultat", async () => {
     const req = createMockReq();
     const res = createMockRes(200);
 
     mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
       cb(res);
-      // Émettre les events SSE
-      res.emit("data", Buffer.from(sseEvent("session.created", { session_id: "sess_x", run_id: "run_1", seq: 1, title: "t", model: "m" })));
-      res.emit("data", Buffer.from(sseEvent("assistant.delta", { session_id: "sess_x", run_id: "run_1", seq: 2, message_id: "msg_1", delta: "Bonjour " })));
-      res.emit("data", Buffer.from(sseEvent("assistant.delta", { session_id: "sess_x", run_id: "run_1", seq: 3, message_id: "msg_1", delta: "monde!" })));
-      res.emit("data", Buffer.from(sseEvent("run.completed", { session_id: "sess_x", run_id: "run_1", seq: 4, completed: true, api_calls: 2 })));
-      res.emit("data", Buffer.from(sseEvent("done", {})));
+      res.emit("data", Buffer.from(
+        openaiChunk("chatcmpl-abc", "Bonjour ") +
+        openaiChunk("chatcmpl-abc", "monde!") +
+        openaiChunk("chatcmpl-abc", undefined, "stop", { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 }) +
+        doneLine(),
+      ));
       res.emit("end");
       return req;
     });
 
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const result = await transport.chat("sess_x", "Bonjour", {});
+    const messages = [{ role: "user" as const, content: "Bonjour" }];
+    const result = await transport.chat(messages, {});
     expect(result.result).toBe("Bonjour monde!");
     expect(result.completed).toBe(true);
-    expect(result.apiCalls).toBe(2);
-    expect(result.hermesSessionId).toBe("sess_x");
+    expect(result.outputTokens).toBe(5);
+    expect(result.chatcmplId).toBe("chatcmpl-abc");
   });
 
   it("appelle onStream pour chaque delta reçu", async () => {
@@ -226,9 +193,10 @@ describe("HermesWebAPITransport.chat()", () => {
     mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
       cb(res);
       res.emit("data", Buffer.from(
-        sseEvent("assistant.delta", { delta: "Hello" }) +
-        sseEvent("assistant.delta", { delta: " World" }) +
-        sseEvent("done", {}),
+        openaiChunk("chatcmpl-xyz", "Hello") +
+        openaiChunk("chatcmpl-xyz", " World") +
+        openaiChunk("chatcmpl-xyz", undefined, "stop") +
+        doneLine(),
       ));
       res.emit("end");
       return req;
@@ -236,7 +204,8 @@ describe("HermesWebAPITransport.chat()", () => {
 
     const deltas: string[] = [];
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    await transport.chat("sess_y", "test", {
+    const messages = [{ role: "user" as const, content: "test" }];
+    await transport.chat(messages, {
       onStream: (d) => deltas.push(d.content),
     });
 
@@ -250,7 +219,9 @@ describe("HermesWebAPITransport.chat()", () => {
     mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
       cb(res);
       // Fragmenter le payload en 2 chunks
-      const full = sseEvent("assistant.delta", { delta: "frag" }) + sseEvent("done", {});
+      const full = openaiChunk("chatcmpl-frag", "frag") +
+        openaiChunk("chatcmpl-frag", undefined, "stop") +
+        doneLine();
       const mid = Math.floor(full.length / 2);
       res.emit("data", Buffer.from(full.slice(0, mid)));
       res.emit("data", Buffer.from(full.slice(mid)));
@@ -259,24 +230,9 @@ describe("HermesWebAPITransport.chat()", () => {
     });
 
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const result = await transport.chat("sess_z", "test", {});
+    const messages = [{ role: "user" as const, content: "test" }];
+    const result = await transport.chat(messages, {});
     expect(result.result).toBe("frag");
-  });
-
-  it("rejette sur event error SSE", async () => {
-    const req = createMockReq();
-    const res = createMockRes(200);
-
-    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
-      cb(res);
-      res.emit("data", Buffer.from(sseEvent("error", { message: "internal failure" })));
-      res.emit("data", Buffer.from(sseEvent("done", {})));
-      res.emit("end");
-      return req;
-    });
-
-    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    await expect(transport.chat("sess_err", "test", {})).rejects.toThrow("internal failure");
   });
 
   it("rejette sur HTTP non-200", async () => {
@@ -291,7 +247,8 @@ describe("HermesWebAPITransport.chat()", () => {
     });
 
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    await expect(transport.chat("sess_404", "test", {})).rejects.toThrow("HTTP 404");
+    const messages = [{ role: "user" as const, content: "test" }];
+    await expect(transport.chat(messages, {})).rejects.toThrow("HTTP 404");
   });
 
   it("gère le timeout SSE (300s)", async () => {
@@ -306,7 +263,8 @@ describe("HermesWebAPITransport.chat()", () => {
     });
 
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    await expect(transport.chat("sess_timeout", "test", {})).rejects.toThrow("timed out");
+    const messages = [{ role: "user" as const, content: "test" }];
+    await expect(transport.chat(messages, {})).rejects.toThrow("timed out");
   });
 });
 
@@ -314,120 +272,112 @@ describe("HermesWebAPITransport.chat()", () => {
 // runViaWebAPI() — fonction utilitaire de haut niveau
 // ---------------------------------------------------------------------------
 describe("runViaWebAPI()", () => {
-  it("crée une session puis stream si pas de resumeSessionId", async () => {
-    const req = createMockReq();
-    const resCreate = createMockRes(201);
-    const resStream = createMockRes(200);
-
-    let callCount = 0;
-    mockRequest.mockImplementation((_opts: any, cb: any) => {
-      callCount++;
-      if (callCount === 1) {
-        // POST /api/sessions
-        cb(resCreate);
-        resCreate.emit("data", Buffer.from(JSON.stringify({ session: { id: "sess_new" } })));
-        resCreate.emit("end");
-      } else {
-        // POST /chat/stream
-        cb(resStream);
-        resStream.emit("data", Buffer.from(
-          sseEvent("assistant.delta", { delta: "OK" }) +
-          sseEvent("run.completed", { completed: true, api_calls: 1 }) +
-          sseEvent("done", {}),
-        ));
-        resStream.emit("end");
-      }
-      return req;
-    });
-
-    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const result = await runViaWebAPI(transport, BASE_OPTS, Date.now());
-
-    expect(result.sessionId).toBe("sess_new");
-    expect(result.result).toBe("OK");
-    expect(result.hermesMeta?.hermesSessionId).toBe("sess_new");
-  });
-
-  it("réutilise une session WebAPI existante (sess_*) sans en créer une nouvelle", async () => {
+  it("envoie les messages et retourne un EngineResult", async () => {
     const req = createMockReq();
     const res = createMockRes(200);
 
     mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
       cb(res);
       res.emit("data", Buffer.from(
-        sseEvent("assistant.delta", { delta: "resume" }) +
-        sseEvent("done", {}),
+        openaiChunk("chatcmpl-run1", "OK") +
+        openaiChunk("chatcmpl-run1", undefined, "stop", { prompt_tokens: 50, completion_tokens: 1, total_tokens: 51 }) +
+        doneLine(),
       ));
       res.emit("end");
       return req;
     });
 
-    const opts: EngineRunOpts = { ...BASE_OPTS, resumeSessionId: "sess_existing" };
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const result = await runViaWebAPI(transport, opts, Date.now());
+    const result = await runViaWebAPI(transport, BASE_OPTS, Date.now());
 
-    // Une seule requête — le chat/stream, pas de POST /api/sessions
+    expect(result.sessionId).toBe("chatcmpl-run1");
+    expect(result.result).toBe("OK");
+    expect(result.hermesMeta?.hermesSessionId).toBe("chatcmpl-run1");
+    // Single call — no session creation
     expect(mockRequest).toHaveBeenCalledTimes(1);
-    expect(result.sessionId).toBe("sess_existing");
-    expect(result.result).toBe("resume");
   });
 
-  it("crée une nouvelle session si resumeSessionId est un ID CLI (non-sess_*)", async () => {
+  it("inclut systemPrompt dans les messages", async () => {
     const req = createMockReq();
-    const resCreate = createMockRes(201);
-    const resStream = createMockRes(200);
+    const res = createMockRes(200);
 
-    let callCount = 0;
-    mockRequest.mockImplementation((_opts: any, cb: any) => {
-      callCount++;
-      if (callCount === 1) {
-        cb(resCreate);
-        resCreate.emit("data", Buffer.from(JSON.stringify({ session: { id: "sess_fresh" } })));
-        resCreate.emit("end");
-      } else {
-        cb(resStream);
-        resStream.emit("data", Buffer.from(sseEvent("done", {})));
-        resStream.emit("end");
-      }
+    let capturedBody = "";
+    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
+      req.write = vi.fn((data: string) => { capturedBody += data; });
+      cb(res);
+      res.emit("data", Buffer.from(
+        openaiChunk("chatcmpl-sys", "reply") +
+        openaiChunk("chatcmpl-sys", undefined, "stop") +
+        doneLine(),
+      ));
+      res.emit("end");
       return req;
     });
 
-    // ID format CLI (pas sess_*)
-    const opts: EngineRunOpts = { ...BASE_OPTS, resumeSessionId: "20260331_123456_abc" };
+    const opts: EngineRunOpts = {
+      ...BASE_OPTS,
+      systemPrompt: "You are a helpful assistant.",
+    };
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    const result = await runViaWebAPI(transport, opts, Date.now());
+    await runViaWebAPI(transport, opts, Date.now());
 
-    expect(mockRequest).toHaveBeenCalledTimes(2);
-    expect(result.sessionId).toBe("sess_fresh");
+    const parsed = JSON.parse(capturedBody);
+    expect(parsed.messages).toHaveLength(2);
+    expect(parsed.messages[0].role).toBe("system");
+    expect(parsed.messages[0].content).toBe("You are a helpful assistant.");
+    expect(parsed.messages[1].role).toBe("user");
+    expect(parsed.stream).toBe(true);
+    expect(parsed.model).toBe("hermes-agent");
   });
 
-  it("encode hermesProfile dans source pour tracking", async () => {
+  it("inclut attachments dans le message user", async () => {
     const req = createMockReq();
-    const resCreate = createMockRes(201);
-    const resStream = createMockRes(200);
+    const res = createMockRes(200);
 
     let capturedBody = "";
-    let callCount = 0;
-    mockRequest.mockImplementation((reqOpts: any, cb: any) => {
-      callCount++;
-      if (callCount === 1) {
-        // Capturer le body de createSession
-        req.write = vi.fn((data: string) => { capturedBody += data; });
-        cb(resCreate);
-        resCreate.emit("data", Buffer.from(JSON.stringify({ session: { id: "sess_prof" } })));
-        resCreate.emit("end");
-      } else {
-        cb(resStream);
-        resStream.emit("data", Buffer.from(sseEvent("done", {})));
-        resStream.emit("end");
-      }
+    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
+      req.write = vi.fn((data: string) => { capturedBody += data; });
+      cb(res);
+      res.emit("data", Buffer.from(
+        openaiChunk("chatcmpl-att", "done") +
+        doneLine(),
+      ));
+      res.emit("end");
+      return req;
+    });
+
+    const opts: EngineRunOpts = {
+      ...BASE_OPTS,
+      prompt: "Read this",
+      attachments: ["/tmp/file1.txt", "/tmp/file2.md"],
+    };
+    const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
+    await runViaWebAPI(transport, opts, Date.now());
+
+    const parsed = JSON.parse(capturedBody);
+    const userMsg = parsed.messages.find((m: any) => m.role === "user");
+    expect(userMsg.content).toContain("file1.txt");
+    expect(userMsg.content).toContain("file2.md");
+  });
+
+  it("préserve hermesProfile dans hermesMeta", async () => {
+    const req = createMockReq();
+    const res = createMockRes(200);
+
+    mockRequest.mockImplementationOnce((_opts: any, cb: any) => {
+      cb(res);
+      res.emit("data", Buffer.from(
+        openaiChunk("chatcmpl-prof", "ok") +
+        doneLine(),
+      ));
+      res.emit("end");
       return req;
     });
 
     const opts: EngineRunOpts = { ...BASE_OPTS, hermesProfile: "my-agent" };
     const transport = new HermesWebAPITransport({ host: "127.0.0.1", port: 8642 });
-    await runViaWebAPI(transport, opts, Date.now());
+    const result = await runViaWebAPI(transport, opts, Date.now());
 
-    expect(capturedBody).toContain("jinn-my-agent");
+    expect(result.hermesMeta?.activeProfile).toBe("my-agent");
   });
 });
