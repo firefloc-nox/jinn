@@ -6,9 +6,21 @@ const HERMES_API = 'http://127.0.0.1:8642'
 // Ces tests vérifient le comportement du moteur Hermes en conditions réelles.
 // Pas de mock — on interroge les APIs live.
 
+let hermesWebApiAvailable = false;
+
+test.beforeAll(async () => {
+  try {
+    const res = await fetch("http://127.0.0.1:8642/api/sessions?limit=1", { signal: AbortSignal.timeout(3000) });
+    hermesWebApiAvailable = res.ok;
+  } catch {
+    hermesWebApiAvailable = false;
+  }
+});
+
 test.describe('Engine routing comparatif', () => {
 
   test('session engine=hermes créée via Jinn est routée vers WebAPI', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     // Créer une session via Jinn (sans message pour éviter un call LLM coûteux)
     const resp = await fetch(`${JINN_API}/api/sessions`, {
       method: 'POST',
@@ -58,6 +70,7 @@ test.describe('Engine routing comparatif', () => {
   })
 
   test('hermes-activity retourne une vue agrégée cohérente', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     const resp = await fetch(`${JINN_API}/api/sessions/hermes-activity?limit=10`)
     expect(resp.ok).toBe(true)
     const data = await resp.json()
@@ -80,6 +93,7 @@ test.describe('Engine routing comparatif', () => {
   })
 
   test('hermes-activity total >= sessions Hermes count', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     // L'activité Hermes doit couvrir toutes les sessions Hermes
     const activityResp = await fetch(`${JINN_API}/api/sessions/hermes-activity?limit=1`)
     const activityData = await activityResp.json()

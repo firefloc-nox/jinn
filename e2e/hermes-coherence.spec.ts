@@ -9,9 +9,21 @@ const JINN_API = 'http://127.0.0.1:7778'
 // Hermes WebAPI :8642 vs Jinn API :7778/api/hermes/*
 // Aucun mock — données réelles en live.
 
+let hermesWebApiAvailable = false;
+
+test.beforeAll(async () => {
+  try {
+    const res = await fetch("http://127.0.0.1:8642/api/sessions?limit=1", { signal: AbortSignal.timeout(3000) });
+    hermesWebApiAvailable = res.ok;
+  } catch {
+    hermesWebApiAvailable = false;
+  }
+});
+
 test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
 
   test('sessions count cohérent', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     // Note: les tests peuvent créer des sessions en parallèle — tolérance ±5
     // On snapshote les deux APIs dans le même intervalle de 500ms
     const [hermesResp, jinnResp] = await Promise.all([
@@ -29,6 +41,7 @@ test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
   })
 
   test('sessions items retournent les mêmes IDs', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     const hermesResp = await fetch(`${HERMES_API}/api/sessions?limit=5`)
     const hermesData = await hermesResp.json()
     const jinnResp = await fetch(`${JINN_API}/api/hermes/sessions?limit=5`)
@@ -44,6 +57,7 @@ test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
   })
 
   test('memory entries cohérentes — target memory', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     const hermesResp = await fetch(`${HERMES_API}/api/memory`)
     expect(hermesResp.ok).toBe(true)
     const hermesData = await hermesResp.json()
@@ -62,6 +76,7 @@ test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
   })
 
   test('memory entries cohérentes — target user', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     const hermesResp = await fetch(`${HERMES_API}/api/memory`)
     const hermesData = await hermesResp.json()
     const jinnResp = await fetch(`${JINN_API}/api/hermes/memory`)
@@ -109,6 +124,7 @@ test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
   })
 
   test('health status cohérent Hermes vs Jinn', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     const hermesHealth = await (await fetch(`${HERMES_API}/health`)).json()
     // Jinn proxy expose /api/hermes/health (peut différer du format)
     const jinnHermesHealth = await (await fetch(`${JINN_API}/api/hermes/health`)).json()
@@ -119,6 +135,7 @@ test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
   })
 
   test('session detail cohérent — même ID via les deux APIs', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     // Prendre la dernière session Hermes
     const listResp = await fetch(`${HERMES_API}/api/sessions?limit=1`)
     const listData = await listResp.json()
@@ -145,6 +162,7 @@ test.describe('Cohérence Hermes WebAPI vs Jinn proxy', () => {
   })
 
   test('skills count cohérent entre Hermes et Jinn', async () => {
+    test.skip(!hermesWebApiAvailable, "Hermes WebAPI unavailable");
     const hermesResp = await fetch(`${HERMES_API}/api/skills`)
     const jinnResp = await fetch(`${JINN_API}/api/hermes/skills`)
 
