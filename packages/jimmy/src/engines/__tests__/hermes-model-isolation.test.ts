@@ -118,7 +118,7 @@ describe("HermesEngine — model isolation regression", () => {
     mockSpawn.mockReturnValue(spawnProc as unknown as ReturnType<typeof spawn>);
 
     const engine = new HermesEngine();
-    await engine.run({ prompt: "test", sessionId: "s1" });
+    await engine.run({ prompt: "test", sessionId: "s1", cwd: "/tmp" });
 
     expect(mockSpawn).toHaveBeenCalledOnce();
     const args = mockSpawn.mock.calls[0]![1] as string[];
@@ -134,7 +134,7 @@ describe("HermesEngine — model isolation regression", () => {
     mockSpawn.mockReturnValue(spawnProc as unknown as ReturnType<typeof spawn>);
 
     const engine = new HermesEngine();
-    await engine.run({ prompt: "test", sessionId: "s1", model: "xiaomi/mimo-v2-pro" });
+    await engine.run({ prompt: "test", sessionId: "s1", cwd: "/tmp", model: "xiaomi/mimo-v2-pro" });
 
     expect(mockSpawn).toHaveBeenCalledOnce();
     const args = mockSpawn.mock.calls[0]![1] as string[];
@@ -152,7 +152,7 @@ describe("HermesEngine — model isolation regression", () => {
     mockSpawn.mockReturnValue(spawnProc as unknown as ReturnType<typeof spawn>);
 
     const engine = new HermesEngine();
-    await engine.run({ prompt: "test", sessionId: "s1", hermesProfile: "jinn-coo" });
+    await engine.run({ prompt: "test", sessionId: "s1", cwd: "/tmp", hermesProfile: "jinn-coo" });
 
     expect(mockSpawn).toHaveBeenCalledOnce();
     const args = mockSpawn.mock.calls[0]![1] as string[];
@@ -170,7 +170,7 @@ describe("HermesEngine — model isolation regression", () => {
     mockSpawn.mockReturnValue(spawnProc as unknown as ReturnType<typeof spawn>);
 
     const engine = new HermesEngine();
-    await engine.run({ prompt: "test", sessionId: "s1", hermesProfile: "jinn-coo" });
+    await engine.run({ prompt: "test", sessionId: "s1", cwd: "/tmp", hermesProfile: "jinn-coo" });
 
     const args = mockSpawn.mock.calls[0]![1] as string[];
     expect(args).not.toContain("--model");
