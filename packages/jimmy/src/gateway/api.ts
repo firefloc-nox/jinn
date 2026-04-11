@@ -880,6 +880,7 @@ export async function handleApiRequest(
         sessionKey,
         replyContext: { source: "web" },
         employee: body.employee,
+        model: body.model || undefined,
         title: body.title,
         portalName: config.portal?.portalName,
       });
@@ -916,6 +917,7 @@ export async function handleApiRequest(
         sessionKey,
         replyContext: { source: "web" },
         employee: body.employee,
+        model: body.model || undefined,
         parentSessionId: body.parentSessionId,
         effortLevel: body.effortLevel,
         prompt,
